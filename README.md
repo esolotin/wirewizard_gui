@@ -42,3 +42,9 @@ in CMD:
 5) install Graphviz from here:  https://graphviz.org/download/
 6) cd..
 7) python -m wirewizard_gui.app
+
+Further runs don't require rebuilding virtual environment.
+Just do:
+1) cd <ProjectPath>\wirewizard_gui
+2) .venv\Scripts\activate.bat
+3) python -m wirewizard_gui.app
