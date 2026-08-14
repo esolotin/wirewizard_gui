@@ -8,6 +8,7 @@ from wirewizard_gui.domain.models import (
     ConnectorModel,
     ProjectModel,
 )
+from wirewizard_gui.domain.connections import iter_component_steps
 from wirewizard_gui.domain.references import ProjectReferences
 from wirewizard_gui.domain.validation import ProjectValidator
 
@@ -27,11 +28,21 @@ class ProjectReferencesTests(unittest.TestCase):
                 ConnectionRowModel(route="X1.1:1 -> --> -> X2:1"),
             ],
         )
+        project.resolve_connection_ids()
+        original_id = project.connectors[0].id
 
         changed = ProjectReferences.rename_component(project, "X1", "X3")
         project.connectors[0].name = "X3"
 
         self.assertEqual(changed, [0, 1, 2])
+        renamed_steps = [
+            step
+            for row in project.connections
+            for step in iter_component_steps(row.steps)
+            if step.component in {"X3", "X3.1"}
+        ]
+        self.assertTrue(renamed_steps)
+        self.assertTrue(all(step.component_id == original_id for step in renamed_steps))
         self.assertEqual(
             [row.route for row in project.connections],
             [

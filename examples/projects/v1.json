@@ -6,9 +6,25 @@
     {
       "name": "X1",
       "pincount": 2
+    },
+    {
+      "name": "X2",
+      "pincount": 2
     }
   ],
-  "cables": [],
+  "cables": [
+    {
+      "name": "W1",
+      "wirecount": 2
+    }
+  ],
   "ferrules": [],
-  "connections": []
+  "connections": [
+    {
+      "route": "X1:[1, 2] -> W1:[1, 2] -> X2:[1, 2]"
+    },
+    {
+      "route": "X1:1 -> --> -> X2:1"
+    }
+  ]
 }

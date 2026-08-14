@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from uuid import uuid4
 
+from wirewizard_gui.domain.connections import ConnectionRowModel, iter_component_steps
 from wirewizard_gui.domain.project_format import CURRENT_SCHEMA_VERSION
 
 
 @dataclass
 class ConnectorModel:
     name: str
+    id: str = field(default_factory=lambda: uuid4().hex)
     type: str = "Универсальный разъём"
     subtype: str = ""
     pincount: int = 2
@@ -22,6 +25,7 @@ class ConnectorModel:
 @dataclass
 class CableModel:
     name: str
+    id: str = field(default_factory=lambda: uuid4().hex)
     type: str = "Универсальный кабель"
     gauge: str = "0.25 mm2"
     length: str = "1 m"
@@ -37,15 +41,11 @@ class CableModel:
 @dataclass
 class FerruleModel:
     name: str
+    id: str = field(default_factory=lambda: uuid4().hex)
     type: str = "Обжимной наконечник"
     subtype: str = "0.5 mm²"
     color: str = ""
     notes: str = ""
-
-
-@dataclass
-class ConnectionRowModel:
-    route: str = ""
 
 
 @dataclass
@@ -59,7 +59,19 @@ class ProjectModel:
     connections: list[ConnectionRowModel] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        self.resolve_connection_ids()
         return asdict(self)
+
+    def resolve_connection_ids(self) -> None:
+        components = {
+            item.name: item.id
+            for item in [*self.connectors, *self.cables, *self.ferrules]
+        }
+        for row in self.connections:
+            for step in iter_component_steps(row.steps):
+                base_name = step.component.split(".", 1)[0]
+                if base_name in components:
+                    step.component_id = components[base_name]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectModel":

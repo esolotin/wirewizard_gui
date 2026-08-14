@@ -130,6 +130,19 @@ class MainWindowDocumentStateTests(unittest.TestCase):
                 self.assertTrue(window._dirty)
                 self.assertTrue(window.windowTitle().endswith(" *"))
 
+    def test_duplicated_component_gets_a_new_internal_id(self) -> None:
+        window = self._make_window()
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+        original_id = window.project.connectors[0].id
+
+        window.duplicate_selected_item()
+        self._wait_for_wireviz(window)
+
+        clone = window.project.connectors[-1]
+        self.assertNotEqual(clone.id, original_id)
+        self.assertEqual(len({item.id for item in window.project.connectors}), 4)
+
     def test_component_editor_signals_immediately_update_right_model(self) -> None:
         window = self._make_window()
 

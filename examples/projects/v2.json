@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "title": "Пример проекта формата v2",
+  "description": "Структурированные соединения и стабильные ID компонентов.",
+  "connectors": [
+    {
+      "name": "X1",
+      "id": "a187bd46b2b34dcf9d20d3f86527ae3d",
+      "pincount": 2
+    }
+  ],
+  "cables": [],
+  "ferrules": [],
+  "connections": [
+    {
+      "steps": [
+        {
+          "kind": "component",
+          "component_id": "a187bd46b2b34dcf9d20d3f86527ae3d",
+          "component": "X1",
+          "value": "1",
+          "items": []
+        }
+      ]
+    }
+  ]
+}

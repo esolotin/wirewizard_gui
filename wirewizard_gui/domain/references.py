@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from wirewizard_gui.domain.connections import iter_component_steps
 from wirewizard_gui.domain.models import ProjectModel
 from wirewizard_gui.domain.serializer import ProjectSerializer
 
@@ -7,19 +8,50 @@ from wirewizard_gui.domain.serializer import ProjectSerializer
 class ProjectReferences:
     @staticmethod
     def dependent_rows(project: ProjectModel, component_name: str) -> list[int]:
+        project.resolve_connection_ids()
+        component_id = next(
+            (
+                item.id
+                for item in [*project.connectors, *project.cables, *project.ferrules]
+                if item.name == component_name
+            ),
+            None,
+        )
         return [
             index
             for index, row in enumerate(project.connections)
-            if ProjectReferences._route_references(row.route, component_name)
+            if any(
+                (component_id is not None and step.component_id == component_id)
+                or ProjectReferences._matches_component(step.component, component_name)
+                for step in iter_component_steps(row.steps)
+            )
         ]
 
     @staticmethod
     def rename_component(project: ProjectModel, old_name: str, new_name: str) -> list[int]:
+        component_id = next(
+            (
+                item.id
+                for item in [*project.connectors, *project.cables, *project.ferrules]
+                if item.name in {old_name, new_name}
+            ),
+            None,
+        )
         changed_rows: list[int] = []
         for index, row in enumerate(project.connections):
-            rewritten, changed = ProjectReferences._rewrite_route(row.route, old_name, new_name)
+            changed = False
+            for step in iter_component_steps(row.steps):
+                if (
+                    component_id is not None and step.component_id == component_id
+                ) or ProjectReferences._matches_component(step.component, old_name):
+                    step.component, token_changed = (
+                        ProjectReferences._rewrite_component_name(
+                            step.component, old_name, new_name
+                        )
+                    )
+                    step.component_id = component_id
+                    changed = changed or token_changed
             if changed:
-                row.route = rewritten
                 changed_rows.append(index)
         return changed_rows
 

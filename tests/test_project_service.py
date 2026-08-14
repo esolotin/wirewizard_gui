@@ -20,7 +20,7 @@ class ProjectServiceTests(unittest.TestCase):
     def test_supported_schema_examples_open_and_save_as_current_version(self) -> None:
         examples = Path(__file__).resolve().parents[1] / "examples" / "projects"
 
-        for filename in ("v0-unversioned.json", "v1.json"):
+        for filename in ("v0-unversioned.json", "v1.json", "v2.json"):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
                 project = ProjectService.load_project(examples / filename)
                 self.assertEqual(project.schema_version, CURRENT_SCHEMA_VERSION)
@@ -31,6 +31,28 @@ class ProjectServiceTests(unittest.TestCase):
 
                 self.assertEqual(payload["schema_version"], CURRENT_SCHEMA_VERSION)
                 self.assertEqual(ProjectService.load_project(saved), project)
+
+    def test_v1_routes_migrate_to_structured_steps_without_loss(self) -> None:
+        path = (
+            Path(__file__).resolve().parents[1] / "examples" / "projects" / "v1.json"
+        )
+
+        project = ProjectService.load_project(path)
+
+        self.assertEqual(
+            [row.route for row in project.connections],
+            [
+                "X1:[1, 2] -> W1:[1, 2] -> X2:[1, 2]",
+                "X1:1 -> --> -> X2:1",
+            ],
+        )
+        self.assertTrue(all(item.id for item in project.connectors + project.cables))
+        self.assertEqual(project.connections[1].steps[1].kind, "arrow")
+        self.assertEqual(project.connections[1].steps[0].component_id, project.connectors[0].id)
+
+        payload = project.to_dict()
+        self.assertNotIn("route", payload["connections"][0])
+        self.assertIn("steps", payload["connections"][0])
 
     def test_unsupported_or_invalid_schema_version_is_rejected(self) -> None:
         invalid_versions = [True, "1", -1, CURRENT_SCHEMA_VERSION + 1]

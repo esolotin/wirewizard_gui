@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Iterator
+from uuid import uuid4
 
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -728,6 +729,7 @@ class MainWindow(QMainWindow):
             existing_cable_names.append(segment_name)
             segment_cable = deepcopy(template)
             segment_cable.name = segment_name
+            segment_cable.id = uuid4().hex
             created_cables.append(segment_cable)
 
             left = plan.connectors[segment_index]
@@ -760,14 +762,17 @@ class MainWindow(QMainWindow):
         if kind == "connector":
             clone = deepcopy(obj)
             clone.name = self._next_name("X", [item.name for item in self.project.connectors])
+            clone.id = uuid4().hex
             self.project.connectors.append(clone)
         elif kind == "cable":
             clone = deepcopy(obj)
             clone.name = self._next_name("W", [item.name for item in self.project.cables])
+            clone.id = uuid4().hex
             self.project.cables.append(clone)
         elif kind == "ferrule":
             clone = deepcopy(obj)
             clone.name = self._next_name("F", [item.name for item in self.project.ferrules])
+            clone.id = uuid4().hex
             self.project.ferrules.append(clone)
         elif kind == "connections":
             self.project.connections.extend(deepcopy(self.project.connections))

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 from typing import Any, Callable
+from uuid import NAMESPACE_URL, uuid5
 
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 class ProjectFormatError(ValueError):
@@ -16,8 +18,47 @@ def _migrate_v0_to_v1(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    from wirewizard_gui.domain.connections import ConnectionRowModel
+
+    component_ids: dict[str, str] = {}
+    for group in ("connectors", "cables", "ferrules"):
+        entries = data.get(group, [])
+        if not isinstance(entries, list):
+            continue
+        for index, item in enumerate(entries):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", ""))
+            component_id = uuid5(
+                NAMESPACE_URL, f"wirewizard-gui:{group}:{index}:{name}"
+            ).hex
+            item["id"] = component_id
+            component_ids.setdefault(name, component_id)
+
+    migrated_connections: list[dict[str, Any]] = []
+    for item in data.get("connections", []) or []:
+        if not isinstance(item, dict):
+            continue
+        row = ConnectionRowModel(route=str(item.get("route", "")))
+        for step in row.steps:
+            _assign_step_ids(step, component_ids)
+        migrated_connections.append(asdict(row))
+    data["connections"] = migrated_connections
+    data["schema_version"] = 2
+    return data
+
+
+def _assign_step_ids(step, component_ids: dict[str, str]) -> None:
+    if step.kind == "component":
+        step.component_id = component_ids.get(step.component.split(".", 1)[0])
+    for item in step.items:
+        _assign_step_ids(item, component_ids)
+
+
 _MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
     0: _migrate_v0_to_v1,
+    1: _migrate_v1_to_v2,
 }
 
 
