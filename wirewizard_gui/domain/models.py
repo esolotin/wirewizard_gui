@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from wirewizard_gui.domain.project_format import CURRENT_SCHEMA_VERSION
+
 
 @dataclass
 class ConnectorModel:
@@ -48,6 +50,7 @@ class ConnectionRowModel:
 
 @dataclass
 class ProjectModel:
+    schema_version: int = CURRENT_SCHEMA_VERSION
     title: str = "Новый жгут"
     description: str = ""
     connectors: list[ConnectorModel] = field(default_factory=list)
@@ -61,6 +64,7 @@ class ProjectModel:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectModel":
         return cls(
+            schema_version=data.get("schema_version", CURRENT_SCHEMA_VERSION),
             title=data.get("title", "Новый жгут"),
             description=data.get("description", ""),
             connectors=[ConnectorModel(**item) for item in data.get("connectors", [])],

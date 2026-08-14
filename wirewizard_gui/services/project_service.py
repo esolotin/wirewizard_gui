@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 
 from wirewizard_gui.domain.models import ProjectModel
+from wirewizard_gui.domain.project_format import migrate_project_data
 from wirewizard_gui.domain.serializer import ProjectSerializer
 
 
@@ -56,7 +57,7 @@ class ProjectService:
         if suffix in {".yml", ".yaml"}:
             return ProjectSerializer.from_wireviz_yaml(text)
         data = json.loads(text)
-        return ProjectModel.from_dict(data)
+        return ProjectModel.from_dict(migrate_project_data(data))
 
     @staticmethod
     def import_yaml(path: str | Path) -> ProjectModel:

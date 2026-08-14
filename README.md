@@ -365,6 +365,12 @@ JSON — основной рабочий формат. Он хранит наз�
 продолжения работы в GUI. Сохранение выполняется через временный файл в том же
 каталоге и атомарную замену: ошибка записи не повреждает предыдущую версию.
 
+Текущая версия схемы — `schema_version: 1`. Старые файлы без этого поля
+считаются версией 0, автоматически мигрируют при открытии и при следующем
+сохранении записываются в текущем формате. Файл с более новой версией не
+открывается, чтобы приложение не потеряло незнакомые данные. Примеры обеих
+поддерживаемых входных версий находятся в [`examples/projects`](examples/projects).
+
 ### WireViz YAML
 
 YAML — формат обмена и вход для WireViz. WireWizardGUI поддерживает:
@@ -394,6 +400,7 @@ wirewizard_gui/
 │   ├── app.py                 # точка входа
 │   ├── domain/
 │   │   ├── models.py          # модели проекта
+│   │   ├── project_format.py  # версия JSON-схемы и миграции
 │   │   ├── serializer.py      # JSON-модель <-> WireViz YAML
 │   │   ├── validation.py      # базовые проверки
 │   │   └── options.py         # предустановленные варианты полей
@@ -407,6 +414,7 @@ wirewizard_gui/
 │       ├── dialogs/           # мастер Daisy-chain
 │       └── panels/            # YAML- и SVG-предпросмотр
 ├── packaging/                  # Windows/Linux-сборки и общий PyInstaller spec
+├── examples/projects/          # примеры поддерживаемых JSON-версий
 ├── tests/                      # domain-, GUI-, runtime- и WireViz-тесты
 ├── pyproject.toml              # пакет и GUI entry point
 ├── requirements.txt            # закреплённые runtime-зависимости
