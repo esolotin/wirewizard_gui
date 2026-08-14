@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QGridLayout,
@@ -26,8 +26,11 @@ class _PartModel:
 
 
 class _RouteCell(QWidget):
+    content_changed = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._suppress_content_changed = False
         self.component_combo = QComboBox()
         self.component_combo.setEditable(True)
         self.value_combo = QComboBox()
@@ -43,23 +46,29 @@ class _RouteCell(QWidget):
         layout.setColumnStretch(1, 2)
 
         self.component_combo.currentTextChanged.connect(self._component_changed)
+        self.value_combo.currentTextChanged.connect(self._value_changed)
 
         self._component_meta: dict[str, tuple[str, list[str]]] = {}
 
     def set_component_options(self, ordered_components: list[tuple[str, str, list[str]]]) -> None:
-        current_component = self.component()
-        current_value = self.value()
-        self._component_meta = {name: (kind, values) for name, kind, values in ordered_components}
-        self.component_combo.blockSignals(True)
-        self.component_combo.clear()
-        self.component_combo.addItem("")
-        for name, kind, _values in ordered_components:
-            label = name if kind != "ferrule" else f"{name} (наконечник)"
-            self.component_combo.addItem(label, userData=name)
-        self.component_combo.blockSignals(False)
-        self.set_component(current_component)
-        self.set_value(current_value)
-        self._component_changed()
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            current_component = self.component()
+            current_value = self.value()
+            self._component_meta = {name: (kind, values) for name, kind, values in ordered_components}
+            self.component_combo.blockSignals(True)
+            self.component_combo.clear()
+            self.component_combo.addItem("")
+            for name, kind, _values in ordered_components:
+                label = name if kind != "ferrule" else f"{name} (наконечник)"
+                self.component_combo.addItem(label, userData=name)
+            self.component_combo.blockSignals(False)
+            self.set_component(current_component)
+            self.set_value(current_value)
+            self._component_changed()
+        finally:
+            self._suppress_content_changed = previous
 
     def component(self) -> str:
         data = self.component_combo.currentData()
@@ -95,32 +104,52 @@ class _RouteCell(QWidget):
             self.value_combo.setCurrentText(value)
 
     def set_part(self, part: _PartModel) -> None:
-        self.set_component(part.component)
-        self.set_value(part.value)
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            self.set_component(part.component)
+            self.set_value(part.value)
+        finally:
+            self._suppress_content_changed = previous
 
     def part(self) -> _PartModel:
         return _PartModel(component=self.component(), value=self.value())
 
     def _component_changed(self) -> None:
-        component_name = self.component()
-        current_value = self.value()
-        self.value_combo.blockSignals(True)
-        self.value_combo.clear()
-        self.value_combo.addItem("")
-        if component_name and component_name in self._component_meta:
-            _kind, values = self._component_meta[component_name]
-            for value in values:
-                self.value_combo.addItem(value)
-        self.value_combo.blockSignals(False)
-        self.set_value(current_value)
+        notify = not self._suppress_content_changed
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            component_name = self.component()
+            current_value = self.value()
+            self.value_combo.blockSignals(True)
+            self.value_combo.clear()
+            self.value_combo.addItem("")
+            if component_name and component_name in self._component_meta:
+                _kind, values = self._component_meta[component_name]
+                for value in values:
+                    self.value_combo.addItem(value)
+            self.value_combo.blockSignals(False)
+            self.set_value(current_value)
+        finally:
+            self._suppress_content_changed = previous
+        if notify:
+            self.content_changed.emit()
+
+    def _value_changed(self) -> None:
+        if not self._suppress_content_changed:
+            self.content_changed.emit()
 
 
 class ConnectionsEditor(QWidget):
+    content_changed = Signal()
+
     INITIAL_STEPS = 7
     MAX_MANUAL_STEPS = 99
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._suppress_content_changed = False
         self.current_items: list[ConnectionRowModel] = []
         self.connectors: list[ConnectorModel] = []
         self.cables: list[CableModel] = []
@@ -180,10 +209,15 @@ class ConnectionsEditor(QWidget):
         self._refresh_all_cell_options()
 
     def load_items(self, items: list[ConnectionRowModel]) -> None:
-        self.current_items = items
-        self.table.setRowCount(0)
-        for item in items:
-            self.add_row(item.route)
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            self.current_items = items
+            self.table.setRowCount(0)
+            for item in items:
+                self.add_row(item.route)
+        finally:
+            self._suppress_content_changed = previous
 
     def add_row(self, route: str = "") -> None:
         row = self.table.rowCount()
@@ -191,12 +225,14 @@ class ConnectionsEditor(QWidget):
         for col in range(self.table.columnCount()):
             cell = _RouteCell(self.table)
             cell.set_component_options(self._component_options())
+            cell.content_changed.connect(self._emit_content_changed)
             self.table.setCellWidget(row, col, cell)
         if route:
             self._apply_route_to_row(row, route)
         else:
             self._prefill_row(row)
         self.table.setCurrentCell(row, 0)
+        self._emit_content_changed()
 
     def duplicate_selected(self) -> None:
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
@@ -211,6 +247,8 @@ class ConnectionsEditor(QWidget):
             rows = [self.table.currentRow()]
         for row in rows:
             self.table.removeRow(row)
+        if rows:
+            self._emit_content_changed()
 
     def compact_selected(self) -> None:
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
@@ -275,8 +313,13 @@ class ConnectionsEditor(QWidget):
             for col in range(old_count, count):
                 cell = _RouteCell(self.table)
                 cell.set_component_options(options)
+                cell.content_changed.connect(self._emit_content_changed)
                 self.table.setCellWidget(row, col, cell)
         self._rebuild_headers()
+
+    def _emit_content_changed(self) -> None:
+        if not self._suppress_content_changed:
+            self.content_changed.emit()
 
     def _refresh_all_cell_options(self) -> None:
         options = self._component_options()

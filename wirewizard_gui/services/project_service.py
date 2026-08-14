@@ -1,16 +1,48 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import tempfile
 
 from wirewizard_gui.domain.models import ProjectModel
 from wirewizard_gui.domain.serializer import ProjectSerializer
 
 
+def _atomic_write_text(path: str | Path, text: str) -> None:
+    target = Path(path)
+    data = text.encode("utf-8")
+    temporary_path: Path | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=target.parent,
+            prefix=".wirewizard-",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(data)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+
+        os.replace(temporary_path, target)
+        temporary_path = None
+    except BaseException:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+
 class ProjectService:
     @staticmethod
     def save_project(path: str | Path, project: ProjectModel) -> None:
-        Path(path).write_text(json.dumps(project.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        text = json.dumps(project.to_dict(), indent=2, ensure_ascii=False)
+        _atomic_write_text(path, text)
 
     @staticmethod
     def save_project_yaml(path: str | Path, project: ProjectModel) -> None:

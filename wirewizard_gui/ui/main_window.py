@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
+from typing import Iterator
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -46,12 +48,15 @@ from wirewizard_gui.ui.panels.yaml_preview import YamlPreviewPanel
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("WireWizardGUI")
         self.resize(1450, 850)
 
         self.project = self._create_demo_project()
         self.current_path: str | None = None
         self.current_path_kind: str = "json"
+        self._change_tracking_depth = 1
+        self._editor_pending = False
+        self._dirty = False
+        self._clean_state: dict | None = None
 
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Состав проекта"])
@@ -95,9 +100,14 @@ class MainWindow(QMainWindow):
         splitter_main.setSizes([280, 420, 700])
         layout.addWidget(splitter_main)
 
+        self._connect_editor_change_signals()
         self._build_toolbar()
+        self._build_shortcuts()
         self._refresh_tree()
         self.refresh_preview()
+        self._clean_state = self.project.to_dict()
+        self._change_tracking_depth = 0
+        self._update_dirty_state()
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Основная панель")
@@ -118,6 +128,65 @@ class MainWindow(QMainWindow):
             btn = QPushButton(text)
             btn.clicked.connect(callback)
             toolbar.addWidget(btn)
+
+    def _build_shortcuts(self) -> None:
+        shortcuts = [
+            ("new_project_action", "Новый проект", "Ctrl+N", self.new_project),
+            ("open_project_action", "Открыть проект", "Ctrl+O", self.open_project),
+            ("save_project_action", "Сохранить проект", "Ctrl+S", self.save_project),
+            ("save_project_as_action", "Сохранить проект как", "Ctrl+Shift+S", self.save_project_as),
+        ]
+        for attribute, text, shortcut, callback in shortcuts:
+            action = QAction(text, self)
+            action.setShortcut(QKeySequence(shortcut))
+            action.triggered.connect(callback)
+            self.addAction(action)
+            setattr(self, attribute, action)
+
+    def _connect_editor_change_signals(self) -> None:
+        line_edits = [
+            self.project_editor.title_edit,
+            self.connector_editor.name_edit,
+            self.connector_editor.pins_edit,
+            self.connector_editor.pinlabels_edit,
+            self.cable_editor.name_edit,
+            self.cable_editor.colors_edit,
+            self.cable_editor.wirelabels_edit,
+            self.ferrule_editor.name_edit,
+        ]
+        for editor in line_edits:
+            editor.textChanged.connect(self._on_editor_content_changed)
+
+        plain_text_edits = [
+            self.project_editor.description_edit,
+            self.connector_editor.notes_edit,
+            self.cable_editor.notes_edit,
+            self.ferrule_editor.notes_edit,
+        ]
+        for editor in plain_text_edits:
+            editor.textChanged.connect(self._on_editor_content_changed)
+
+        combo_boxes = [
+            self.connector_editor.type_combo,
+            self.connector_editor.subtype_combo,
+            self.connector_editor.color_combo,
+            self.cable_editor.type_combo,
+            self.cable_editor.gauge_combo,
+            self.cable_editor.length_combo,
+            self.cable_editor.color_code_combo,
+            self.ferrule_editor.type_combo,
+            self.ferrule_editor.subtype_combo,
+            self.ferrule_editor.color_combo,
+        ]
+        for combo_box in combo_boxes:
+            combo_box.currentTextChanged.connect(self._on_editor_content_changed)
+
+        self.connector_editor.pincount_spin.valueChanged.connect(self._on_editor_content_changed)
+        self.cable_editor.wirecount_spin.valueChanged.connect(self._on_editor_content_changed)
+        self.connector_editor.simple_check.toggled.connect(self._on_editor_content_changed)
+        self.cable_editor.shield_check.toggled.connect(self._on_editor_content_changed)
+        self.cable_editor.bundle_check.toggled.connect(self._on_editor_content_changed)
+        self.connections_editor.content_changed.connect(self._on_editor_content_changed)
 
     def _create_demo_project(self) -> ProjectModel:
         return ProjectModel(
@@ -183,47 +252,155 @@ class MainWindow(QMainWindow):
         self.project_tree.expandAll()
         self.connections_editor.set_component_sources(self.project.connectors, self.project.cables, self.project.ferrules)
 
+    @contextmanager
+    def _suspend_change_tracking(self) -> Iterator[None]:
+        self._change_tracking_depth += 1
+        try:
+            yield
+        finally:
+            self._change_tracking_depth -= 1
+
+    def _on_editor_content_changed(self, *_args) -> None:
+        if self._change_tracking_depth:
+            return
+        self._editor_pending = True
+        self._save_current_editor()
+
     def _save_current_editor(self) -> None:
+        if not self._editor_pending:
+            return
         idx = self.editor_stack.currentIndex()
-        if idx == 1:
-            self.project_editor.save_to_item()
-        elif idx == 2:
-            self.connector_editor.save_to_item()
-        elif idx == 3:
-            self.cable_editor.save_to_item()
-        elif idx == 4:
-            self.ferrule_editor.save_to_item()
-        elif idx == 5:
-            self.project.connections = self.connections_editor.save_to_items()
+        try:
+            if idx == 1:
+                self.project_editor.save_to_item()
+            elif idx == 2:
+                self.connector_editor.save_to_item()
+            elif idx == 3:
+                self.cable_editor.save_to_item()
+            elif idx == 4:
+                self.ferrule_editor.save_to_item()
+            elif idx == 5:
+                self.project.connections = self.connections_editor.save_to_items()
+        finally:
+            self._editor_pending = False
+        self._update_dirty_state()
+
+    def _update_dirty_state(self) -> None:
+        dirty = self._clean_state is None or self.project.to_dict() != self._clean_state
+        if dirty != self._dirty:
+            self._dirty = dirty
+            self.setWindowModified(dirty)
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        document_name = Path(self.current_path).name if self.current_path else self.project.title.strip()
+        document_name = document_name or "Без имени"
+        marker = " *" if self._dirty else ""
+        self.setWindowTitle(f"WireWizardGUI — {document_name}{marker}")
+
+    def _mark_clean(self) -> None:
+        self._clean_state = self.project.to_dict()
+        self._update_dirty_state()
+
+    def _install_project(self, project: ProjectModel, path: str | None, *, dirty: bool) -> None:
+        previous_project = self.project
+        previous_path = self.current_path
+        previous_path_kind = self.current_path_kind
+        previous_clean_state = self._clean_state
+
+        try:
+            with self._suspend_change_tracking():
+                self._editor_pending = False
+                self.editor_stack.setCurrentIndex(0)
+                self.project = project
+                self.current_path = path
+                self.current_path_kind = "json"
+                self._refresh_tree()
+                self.refresh_preview()
+            self._clean_state = None if dirty else self.project.to_dict()
+            self._update_dirty_state()
+        except BaseException:
+            with self._suspend_change_tracking():
+                self._editor_pending = False
+                self.editor_stack.setCurrentIndex(0)
+                self.project = previous_project
+                self.current_path = previous_path
+                self.current_path_kind = previous_path_kind
+                try:
+                    self._refresh_tree()
+                    self.refresh_preview()
+                except BaseException:
+                    pass
+            self._clean_state = previous_clean_state
+            self._update_dirty_state()
+            raise
+
+    def _confirm_unsaved_changes(self, action: str) -> bool:
+        self._save_current_editor()
+        if not self._dirty:
+            return True
+
+        answer = self._ask_unsaved_changes(action)
+        if answer == QMessageBox.StandardButton.Save:
+            return self.save_project()
+        return answer == QMessageBox.StandardButton.Discard
+
+    def _ask_unsaved_changes(self, action: str) -> QMessageBox.StandardButton:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Несохранённые изменения")
+        dialog.setText(f"В проекте есть несохранённые изменения. Сохранить их перед тем, как {action}?")
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        labels = {
+            QMessageBox.StandardButton.Save: "Сохранить",
+            QMessageBox.StandardButton.Discard: "Не сохранять",
+            QMessageBox.StandardButton.Cancel: "Отмена",
+        }
+        for standard_button, label in labels.items():
+            button = dialog.button(standard_button)
+            if button is not None:
+                button.setText(label)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Save)
+        dialog.exec()
+        clicked_button = dialog.clickedButton()
+        if clicked_button is None:
+            return QMessageBox.StandardButton.Cancel
+        return dialog.standardButton(clicked_button)
 
     def _on_tree_selection_changed(self) -> None:
         self._save_current_editor()
-        items = self.project_tree.selectedItems()
-        if not items:
-            self.editor_stack.setCurrentIndex(0)
-            return
-        payload = items[0].data(0, Qt.UserRole)
-        if not payload:
-            self.editor_stack.setCurrentIndex(0)
-            return
-        kind, obj = payload
-        if kind == "project":
-            self.project_editor.load_item(obj)
-            self.editor_stack.setCurrentIndex(1)
-        elif kind == "connector":
-            self.connector_editor.load_item(obj)
-            self.editor_stack.setCurrentIndex(2)
-        elif kind == "cable":
-            self.cable_editor.load_item(obj)
-            self.editor_stack.setCurrentIndex(3)
-        elif kind == "ferrule":
-            self.ferrule_editor.load_item(obj)
-            self.editor_stack.setCurrentIndex(4)
-        elif kind == "connections":
-            self.connections_editor.load_items(obj)
-            self.editor_stack.setCurrentIndex(5)
-        else:
-            self.editor_stack.setCurrentIndex(0)
+        with self._suspend_change_tracking():
+            items = self.project_tree.selectedItems()
+            if not items:
+                self.editor_stack.setCurrentIndex(0)
+                return
+            payload = items[0].data(0, Qt.UserRole)
+            if not payload:
+                self.editor_stack.setCurrentIndex(0)
+                return
+            kind, obj = payload
+            if kind == "project":
+                self.project_editor.load_item(obj)
+                self.editor_stack.setCurrentIndex(1)
+            elif kind == "connector":
+                self.connector_editor.load_item(obj)
+                self.editor_stack.setCurrentIndex(2)
+            elif kind == "cable":
+                self.cable_editor.load_item(obj)
+                self.editor_stack.setCurrentIndex(3)
+            elif kind == "ferrule":
+                self.ferrule_editor.load_item(obj)
+                self.editor_stack.setCurrentIndex(4)
+            elif kind == "connections":
+                self.connections_editor.load_items(obj)
+                self.editor_stack.setCurrentIndex(5)
+            else:
+                self.editor_stack.setCurrentIndex(0)
+        self._editor_pending = False
 
     def _selected_payload(self):
         items = self.project_tree.selectedItems()
@@ -277,12 +454,12 @@ class MainWindow(QMainWindow):
         menu.exec(self.project_tree.viewport().mapToGlobal(pos))
 
     def new_project(self) -> None:
-        self._save_current_editor()
-        self.project = ProjectModel(title="Новый жгут")
-        self.current_path = None
-        self.current_path_kind = "json"
-        self._refresh_tree()
-        self.refresh_preview()
+        if not self._confirm_unsaved_changes("создать новый проект"):
+            return
+        try:
+            self._install_project(ProjectModel(title="Новый жгут"), None, dirty=False)
+        except Exception as exc:
+            QMessageBox.critical(self, "Новый проект", str(exc))
 
     def open_project(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -293,12 +470,12 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        if not self._confirm_unsaved_changes("открыть другой проект"):
+            return
         try:
-            self.project = ProjectService.load_project(path)
-            self.current_path = path if Path(path).suffix.lower() == ".json" else None
-            self.current_path_kind = "json"
-            self._refresh_tree()
-            self.refresh_preview()
+            project = ProjectService.load_project(path)
+            is_json = Path(path).suffix.lower() == ".json"
+            self._install_project(project, path if is_json else None, dirty=not is_json)
             self.statusBar().showMessage(f"Открыт файл: {path}", 4000)
         except Exception as exc:
             QMessageBox.critical(self, "Открытие проекта", str(exc))
@@ -307,30 +484,31 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Импорт YAML WireViz", "", "Файлы YAML (*.yml *.yaml)")
         if not path:
             return
+        if not self._confirm_unsaved_changes("импортировать YAML"):
+            return
         try:
-            self.project = ProjectService.import_yaml(path)
-            self.current_path = None
-            self.current_path_kind = "json"
-            self._refresh_tree()
-            self.refresh_preview()
+            project = ProjectService.import_yaml(path)
+            self._install_project(project, None, dirty=True)
             self.statusBar().showMessage(f"Импортирован YAML: {path}", 4000)
         except Exception as exc:
             QMessageBox.critical(self, "Импорт YAML", str(exc))
 
-    def save_project(self) -> None:
+    def save_project(self) -> bool:
         self._save_current_editor()
         path = self.current_path
         if not path:
-            self.save_project_as()
-            return
+            return self.save_project_as()
         try:
             ProjectService.save_project(path, self.project)
-            self.statusBar().showMessage(f"Проект сохранён: {path}", 4000)
-            self._refresh_tree()
         except Exception as exc:
             QMessageBox.critical(self, "Сохранение проекта", str(exc))
+            return False
+        self._mark_clean()
+        self.statusBar().showMessage(f"Проект сохранён: {path}", 4000)
+        self._refresh_tree()
+        return True
 
-    def save_project_as(self) -> None:
+    def save_project_as(self) -> bool:
         self._save_current_editor()
         path, _ = QFileDialog.getSaveFileName(
             self,
@@ -339,15 +517,18 @@ class MainWindow(QMainWindow):
             "Проект JSON (*.json)",
         )
         if not path:
-            return
+            return False
         try:
             ProjectService.save_project(path, self.project)
-            self.current_path = path
-            self.current_path_kind = "json"
-            self.statusBar().showMessage(f"Проект сохранён: {path}", 4000)
-            self._refresh_tree()
         except Exception as exc:
             QMessageBox.critical(self, "Сохранение проекта", str(exc))
+            return False
+        self.current_path = path
+        self.current_path_kind = "json"
+        self._mark_clean()
+        self.statusBar().showMessage(f"Проект сохранён: {path}", 4000)
+        self._refresh_tree()
+        return True
 
     def export_yaml(self) -> None:
         self._save_current_editor()
@@ -378,6 +559,7 @@ class MainWindow(QMainWindow):
         self._save_current_editor()
         new_name = self._next_name("X", [item.name for item in self.project.connectors])
         self.project.connectors.append(ConnectorModel(name=new_name))
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
 
@@ -385,6 +567,7 @@ class MainWindow(QMainWindow):
         self._save_current_editor()
         new_name = self._next_name("W", [item.name for item in self.project.cables])
         self.project.cables.append(CableModel(name=new_name))
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
 
@@ -392,6 +575,7 @@ class MainWindow(QMainWindow):
         self._save_current_editor()
         new_name = self._next_name("F", [item.name for item in self.project.ferrules])
         self.project.ferrules.append(FerruleModel(name=new_name))
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
 
@@ -399,6 +583,7 @@ class MainWindow(QMainWindow):
         self._save_current_editor()
         seed = self._default_route_template()
         self.project.connections.append(ConnectionRowModel(route=seed))
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
 
@@ -456,6 +641,7 @@ class MainWindow(QMainWindow):
 
         self.project.cables.extend(created_cables)
         self.project.connections.extend(generated)
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
         self.statusBar().showMessage(
@@ -485,10 +671,12 @@ class MainWindow(QMainWindow):
             self.project.connections.extend(deepcopy(self.project.connections))
         else:
             return
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
 
     def delete_selected_item(self) -> None:
+        self._save_current_editor()
         payload = self._selected_payload()
         if not payload:
             return
@@ -501,6 +689,9 @@ class MainWindow(QMainWindow):
             self.project.ferrules = [x for x in self.project.ferrules if x is not obj]
         elif kind == "connections":
             self.project.connections = []
+        else:
+            return
+        self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
 
@@ -528,6 +719,12 @@ class MainWindow(QMainWindow):
                 preview_message += "\n\nПредупреждения проверки:\n" + "\n".join(errors)
             self.svg_preview.show_message(preview_message)
             self.statusBar().showMessage(message, 5000)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._confirm_unsaved_changes("закрыть приложение"):
+            event.accept()
+        else:
+            event.ignore()
 
     @staticmethod
     def _next_name(prefix: str, existing: list[str]) -> str:

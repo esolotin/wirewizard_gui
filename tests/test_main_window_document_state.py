@@ -1,0 +1,566 @@
+from __future__ import annotations
+
+from copy import deepcopy
+import os
+import unittest
+from unittest.mock import patch
+
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+try:
+    import PySide6  # noqa: F401
+except ModuleNotFoundError:
+    PYSIDE_AVAILABLE = False
+else:
+    PYSIDE_AVAILABLE = True
+
+
+@unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
+class MainWindowDocumentStateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        self.render_patch = patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            return_value=(False, "Предпросмотр недоступен", None),
+        )
+        self.render_patch.start()
+        self.addCleanup(self.render_patch.stop)
+
+    def _make_window(self):
+        from wirewizard_gui.ui.main_window import MainWindow
+
+        window = MainWindow()
+        self.addCleanup(self._close_without_prompt, window)
+        return window
+
+    def _close_without_prompt(self, window) -> None:
+        with patch.object(window, "_confirm_unsaved_changes", return_value=True):
+            window.close()
+        window.deleteLater()
+        self.app.processEvents()
+
+    @staticmethod
+    def _select_project(window) -> None:
+        window.project_tree.setCurrentItem(window.project_tree.topLevelItem(0))
+
+    def _make_dirty(self, window) -> None:
+        self._select_project(window)
+        window.project_editor.title_edit.setText(f"{window.project.title} изменён")
+        self.assertTrue(window._dirty)
+
+    def test_field_edit_sets_dirty_marker_and_revert_clears_it(self) -> None:
+        window = self._make_window()
+        original_title = window.project.title
+
+        self._select_project(window)
+        window.project_editor.title_edit.setText("Изменённый проект")
+
+        self.assertTrue(window._dirty)
+        self.assertTrue(window.isWindowModified())
+        self.assertEqual(window.project.title, "Изменённый проект")
+        self.assertTrue(window.windowTitle().endswith(" *"), window.windowTitle())
+
+        window.project_editor.title_edit.setText(original_title)
+
+        self.assertFalse(window._dirty)
+        self.assertFalse(window.isWindowModified())
+        self.assertNotIn("*", window.windowTitle())
+
+    def test_selection_refresh_and_presentation_changes_do_not_set_dirty(self) -> None:
+        window = self._make_window()
+        original = window.project.to_dict()
+        root = window.project_tree.topLevelItem(0)
+        nodes = [
+            root,
+            root.child(0),
+            root.child(0).child(0),
+            root.child(1).child(0),
+            root.child(2).child(0),
+            root.child(3).child(0),
+        ]
+
+        for node in nodes:
+            window.project_tree.setCurrentItem(node)
+            self.assertFalse(window._dirty, node.text(0))
+
+        window.connections_editor.steps_spin.setValue(6)
+        window.connections_editor.set_component_sources(
+            window.project.connectors,
+            window.project.cables,
+            window.project.ferrules,
+        )
+        window.refresh_preview()
+
+        self.assertFalse(window._dirty)
+        self.assertEqual(window.project.to_dict(), original)
+
+    def test_structural_add_operations_set_dirty(self) -> None:
+        cases = [
+            ("add_connector", "connectors"),
+            ("add_cable", "cables"),
+            ("add_ferrule", "ferrules"),
+            ("add_connection_row", "connections"),
+        ]
+
+        for method_name, collection_name in cases:
+            with self.subTest(method=method_name):
+                window = self._make_window()
+                before = len(getattr(window.project, collection_name))
+
+                getattr(window, method_name)()
+
+                self.assertEqual(len(getattr(window.project, collection_name)), before + 1)
+                self.assertTrue(window._dirty)
+                self.assertTrue(window.windowTitle().endswith(" *"))
+
+    def test_component_editor_signals_immediately_update_right_model(self) -> None:
+        window = self._make_window()
+
+        for case in ("connector_combo", "cable_spin", "cable_check", "ferrule_plain_text"):
+            with self.subTest(case=case):
+                window._install_project(window._create_demo_project(), None, dirty=False)
+                root = window.project_tree.topLevelItem(0)
+
+                if case == "connector_combo":
+                    window.project_tree.setCurrentItem(root.child(0).child(0))
+                    window.connector_editor.type_combo.setEditText("Тестовый разъём")
+                    self.assertEqual(window.project.connectors[0].type, "Тестовый разъём")
+                elif case == "cable_spin":
+                    window.project_tree.setCurrentItem(root.child(1).child(0))
+                    new_count = window.project.cables[0].wirecount + 1
+                    window.cable_editor.wirecount_spin.setValue(new_count)
+                    self.assertEqual(window.project.cables[0].wirecount, new_count)
+                elif case == "cable_check":
+                    window.project_tree.setCurrentItem(root.child(1).child(0))
+                    new_shield = not window.project.cables[0].shield
+                    window.cable_editor.shield_check.setChecked(new_shield)
+                    self.assertEqual(window.project.cables[0].shield, new_shield)
+                else:
+                    window.project_tree.setCurrentItem(root.child(2).child(0))
+                    window.ferrule_editor.notes_edit.setPlainText("Проверка наконечника")
+                    self.assertEqual(window.project.ferrules[0].notes, "Проверка наконечника")
+
+                self.assertTrue(window._dirty)
+                self.assertTrue(window.windowTitle().endswith(" *"))
+
+    def test_connection_cell_and_row_changes_set_dirty(self) -> None:
+        window = self._make_window()
+        connections_node = window.project_tree.topLevelItem(0).child(3).child(0)
+        window.project_tree.setCurrentItem(connections_node)
+        cell = window.connections_editor.table.cellWidget(0, 0)
+
+        cell.component_combo.setCurrentIndex(cell.component_combo.findData("X2"))
+
+        self.assertTrue(window._dirty)
+        self.assertTrue(window.project.connections[0].route.startswith("X2:"))
+
+        window._install_project(window._create_demo_project(), None, dirty=False)
+        connections_node = window.project_tree.topLevelItem(0).child(3).child(0)
+        window.project_tree.setCurrentItem(connections_node)
+        before = len(window.project.connections)
+
+        window.connections_editor.add_row()
+
+        self.assertEqual(len(window.project.connections), before + 1)
+        self.assertTrue(window._dirty)
+
+    def test_connections_editor_suppresses_load_signals_but_emits_user_changes(self) -> None:
+        from unittest.mock import Mock
+
+        from wirewizard_gui.domain.models import CableModel, ConnectionRowModel, ConnectorModel
+        from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
+
+        editor = ConnectionsEditor()
+        self.addCleanup(editor.close)
+        editor.set_component_sources(
+            [ConnectorModel(name="X1"), ConnectorModel(name="X2")],
+            [CableModel(name="W1")],
+            [],
+        )
+        changed = Mock()
+        editor.content_changed.connect(changed)
+
+        editor.load_items([ConnectionRowModel(route="X1:1 -> W1:1 -> X2:1")])
+        changed.assert_not_called()
+
+        editor.add_row()
+        self.assertGreaterEqual(changed.call_count, 1)
+
+        changed.reset_mock()
+        editor.remove_selected()
+        self.assertGreaterEqual(changed.call_count, 1)
+
+        changed.reset_mock()
+        cell = editor.table.cellWidget(0, 0)
+        cell.component_combo.setCurrentIndex(cell.component_combo.findData("X2"))
+        self.assertGreaterEqual(changed.call_count, 1)
+
+    def test_successful_save_clears_dirty_and_marker(self) -> None:
+        window = self._make_window()
+        window.current_path = "saved-project.json"
+        self._make_dirty(window)
+
+        with patch("wirewizard_gui.ui.main_window.ProjectService.save_project") as save:
+            result = window.save_project()
+
+        self.assertTrue(result)
+        save.assert_called_once_with("saved-project.json", window.project)
+        self.assertFalse(window._dirty)
+        self.assertFalse(window.isWindowModified())
+        self.assertNotIn("*", window.windowTitle())
+
+    def test_save_as_cancel_and_save_error_keep_dirty_state(self) -> None:
+        window = self._make_window()
+        self._make_dirty(window)
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=("", ""),
+            ),
+            patch("wirewizard_gui.ui.main_window.ProjectService.save_project") as save,
+        ):
+            result = window.save_project()
+
+        self.assertFalse(result)
+        self.assertIsNone(window.current_path)
+        self.assertTrue(window._dirty)
+        save.assert_not_called()
+
+        window.current_path = "existing.json"
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.ProjectService.save_project",
+                side_effect=OSError("disk full"),
+            ),
+            patch("wirewizard_gui.ui.main_window.QMessageBox.critical") as critical,
+        ):
+            result = window.save_project()
+
+        self.assertFalse(result)
+        self.assertEqual(window.current_path, "existing.json")
+        self.assertTrue(window._dirty)
+        critical.assert_called_once()
+
+    def test_confirmation_maps_save_discard_and_cancel(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        window = self._make_window()
+        self._make_dirty(window)
+
+        with (
+            patch.object(
+                window,
+                "_ask_unsaved_changes",
+                return_value=QMessageBox.StandardButton.Save,
+            ),
+            patch.object(window, "save_project", return_value=False) as save,
+        ):
+            self.assertFalse(window._confirm_unsaved_changes("продолжить"))
+            save.assert_called_once_with()
+
+        with patch.object(
+            window,
+            "_ask_unsaved_changes",
+            return_value=QMessageBox.StandardButton.Discard,
+        ):
+            self.assertTrue(window._confirm_unsaved_changes("продолжить"))
+
+        with patch.object(
+            window,
+            "_ask_unsaved_changes",
+            return_value=QMessageBox.StandardButton.Cancel,
+        ):
+            self.assertFalse(window._confirm_unsaved_changes("продолжить"))
+
+    def test_new_project_cancel_preserves_and_discard_replaces_document(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        window = self._make_window()
+        self._make_dirty(window)
+        old_project = window.project
+        old_state = window.project.to_dict()
+
+        with patch.object(
+            window,
+            "_ask_unsaved_changes",
+            return_value=QMessageBox.StandardButton.Cancel,
+        ):
+            window.new_project()
+
+        self.assertIs(window.project, old_project)
+        self.assertEqual(window.project.to_dict(), old_state)
+        self.assertTrue(window._dirty)
+
+        with patch.object(
+            window,
+            "_ask_unsaved_changes",
+            return_value=QMessageBox.StandardButton.Discard,
+        ):
+            window.new_project()
+
+        self.assertIsNot(window.project, old_project)
+        self.assertEqual(window.project.title, "Новый жгут")
+        self.assertFalse(window._dirty)
+        self.assertIsNone(window.current_path)
+
+    def test_open_dialog_cancel_and_unsaved_guard_preserve_document(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        window = self._make_window()
+        self._make_dirty(window)
+        old_project = window.project
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+                return_value=("", ""),
+            ),
+            patch.object(window, "_confirm_unsaved_changes") as confirm,
+        ):
+            window.open_project()
+            confirm.assert_not_called()
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+                return_value=("opened.json", ""),
+            ),
+            patch.object(
+                window,
+                "_ask_unsaved_changes",
+                return_value=QMessageBox.StandardButton.Cancel,
+            ),
+            patch("wirewizard_gui.ui.main_window.ProjectService.load_project") as load,
+        ):
+            window.open_project()
+            load.assert_not_called()
+
+        self.assertIs(window.project, old_project)
+        self.assertTrue(window._dirty)
+
+    def test_open_discard_installs_clean_json_document(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from wirewizard_gui.domain.models import ProjectModel
+
+        window = self._make_window()
+        self._make_dirty(window)
+        opened = ProjectModel(title="Открытый проект")
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+                return_value=("opened.json", ""),
+            ),
+            patch.object(
+                window,
+                "_ask_unsaved_changes",
+                return_value=QMessageBox.StandardButton.Discard,
+            ),
+            patch(
+                "wirewizard_gui.ui.main_window.ProjectService.load_project",
+                return_value=opened,
+            ) as load,
+        ):
+            window.open_project()
+
+        load.assert_called_once_with("opened.json")
+        self.assertIs(window.project, opened)
+        self.assertEqual(window.current_path, "opened.json")
+        self.assertFalse(window._dirty)
+
+    def test_open_yaml_installs_dirty_document_without_native_path(self) -> None:
+        from wirewizard_gui.domain.models import ProjectModel
+
+        window = self._make_window()
+        opened = ProjectModel(title="Проект из YAML")
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+                return_value=("harness.yml", ""),
+            ),
+            patch.object(window, "_ask_unsaved_changes") as ask,
+            patch(
+                "wirewizard_gui.ui.main_window.ProjectService.load_project",
+                return_value=opened,
+            ),
+        ):
+            window.open_project()
+
+        ask.assert_not_called()
+        self.assertIs(window.project, opened)
+        self.assertIsNone(window.current_path)
+        self.assertTrue(window._dirty)
+        self.assertTrue(window.windowTitle().endswith(" *"))
+
+    def test_failed_project_install_rolls_back_dirty_document(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from wirewizard_gui.domain.models import ProjectModel
+
+        window = self._make_window()
+        window.current_path = "old-project.json"
+        self._make_dirty(window)
+        old_project = window.project
+        old_data = window.project.to_dict()
+        old_path = window.current_path
+        old_clean_state = deepcopy(window._clean_state)
+        old_dirty = window._dirty
+        replacement = ProjectModel(title="Новый проект")
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+                return_value=("new-project.json", ""),
+            ),
+            patch.object(
+                window,
+                "_ask_unsaved_changes",
+                return_value=QMessageBox.StandardButton.Discard,
+            ),
+            patch(
+                "wirewizard_gui.ui.main_window.ProjectService.load_project",
+                return_value=replacement,
+            ),
+            patch.object(window, "refresh_preview", side_effect=RuntimeError("preview failed")),
+            patch("wirewizard_gui.ui.main_window.QMessageBox.critical") as critical,
+        ):
+            window.open_project()
+
+        critical.assert_called_once()
+        self.assertIs(window.project, old_project)
+        self.assertEqual(window.project.to_dict(), old_data)
+        self.assertEqual(window.current_path, old_path)
+        self.assertEqual(window._clean_state, old_clean_state)
+        self.assertEqual(window._dirty, old_dirty)
+
+    def test_import_save_failure_blocks_replacement_and_success_proceeds(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from wirewizard_gui.domain.models import ProjectModel
+
+        window = self._make_window()
+        self._make_dirty(window)
+        old_project = window.project
+        imported = ProjectModel(title="Импортированный проект")
+        dialog_patch = patch(
+            "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+            return_value=("import.yml", ""),
+        )
+        warning_patch = patch.object(
+            window,
+            "_ask_unsaved_changes",
+            return_value=QMessageBox.StandardButton.Save,
+        )
+
+        with (
+            dialog_patch,
+            warning_patch,
+            patch.object(window, "save_project", return_value=False),
+            patch("wirewizard_gui.ui.main_window.ProjectService.import_yaml") as load,
+        ):
+            window.import_yaml()
+            load.assert_not_called()
+
+        self.assertIs(window.project, old_project)
+        self.assertTrue(window._dirty)
+
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getOpenFileName",
+                return_value=("import.yml", ""),
+            ),
+            patch.object(
+                window,
+                "_ask_unsaved_changes",
+                return_value=QMessageBox.StandardButton.Save,
+            ),
+            patch.object(window, "save_project", return_value=True),
+            patch(
+                "wirewizard_gui.ui.main_window.ProjectService.import_yaml",
+                return_value=imported,
+            ) as load,
+        ):
+            window.import_yaml()
+
+        load.assert_called_once_with("import.yml")
+        self.assertIs(window.project, imported)
+        self.assertIsNone(window.current_path)
+        self.assertTrue(window._dirty)
+
+    def test_close_event_honours_save_discard_and_cancel(self) -> None:
+        from PySide6.QtGui import QCloseEvent
+        from PySide6.QtWidgets import QMessageBox
+
+        window = self._make_window()
+        self._make_dirty(window)
+
+        cases = [
+            (QMessageBox.StandardButton.Cancel, None, False),
+            (QMessageBox.StandardButton.Discard, None, True),
+            (QMessageBox.StandardButton.Save, False, False),
+            (QMessageBox.StandardButton.Save, True, True),
+        ]
+        for answer, save_result, accepted in cases:
+            with self.subTest(answer=answer, save_result=save_result):
+                event = QCloseEvent()
+                save_patch = patch.object(window, "save_project", return_value=save_result)
+                with (
+                    patch.object(
+                        window,
+                        "_ask_unsaved_changes",
+                        return_value=answer,
+                    ),
+                    save_patch as save,
+                ):
+                    window.closeEvent(event)
+
+                self.assertEqual(event.isAccepted(), accepted)
+                if answer == QMessageBox.StandardButton.Save:
+                    save.assert_called_once_with()
+                else:
+                    save.assert_not_called()
+
+    def test_clean_close_does_not_prompt(self) -> None:
+        from PySide6.QtGui import QCloseEvent
+
+        window = self._make_window()
+        event = QCloseEvent()
+
+        with patch.object(window, "_ask_unsaved_changes") as ask:
+            window.closeEvent(event)
+
+        self.assertTrue(event.isAccepted())
+        ask.assert_not_called()
+
+    def test_document_shortcuts_are_registered(self) -> None:
+        from PySide6.QtGui import QKeySequence
+
+        window = self._make_window()
+        expected = {
+            "new_project_action": "Ctrl+N",
+            "open_project_action": "Ctrl+O",
+            "save_project_action": "Ctrl+S",
+            "save_project_as_action": "Ctrl+Shift+S",
+        }
+
+        for attribute, shortcut in expected.items():
+            with self.subTest(action=attribute):
+                action = getattr(window, attribute)
+                self.assertIn(action, window.actions())
+                self.assertEqual(
+                    action.shortcut().toString(QKeySequence.SequenceFormat.PortableText),
+                    shortcut,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
