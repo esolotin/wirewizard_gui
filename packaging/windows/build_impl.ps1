@@ -204,27 +204,9 @@ if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
     Stop-Build "project virtual environment was not found at '$pythonPath'. From the repository root run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\prepare.ps1"
 }
 
-$dependencyCheck = @'
-import importlib.util
-import struct
-import sys
-
-required = {
-    "Pillow": "PIL",
-    "PyInstaller": "PyInstaller",
-    "PySide6": "PySide6",
-    "PyYAML": "yaml",
-    "WireViz": "wireviz",
-}
-missing = [name for name, module in required.items() if importlib.util.find_spec(module) is None]
-if missing:
-    print("Missing build dependencies: " + ", ".join(missing), file=sys.stderr)
-    raise SystemExit(2)
-if struct.calcsize("P") * 8 != 64:
-    print("A 64-bit Python interpreter is required for the x64 release.", file=sys.stderr)
-    raise SystemExit(3)
-print(sys.version.split()[0])
-'@
+# Keep this python -c probe compatible with Windows PowerShell 5.1.
+# Embedded double quotes in multiline native arguments can be stripped.
+$dependencyCheck = "import importlib.util,struct,sys;required={'Pillow':'PIL','PyInstaller':'PyInstaller','PySide6':'PySide6','PyYAML':'yaml','WireViz':'wireviz'};missing=[name for name,module in required.items() if importlib.util.find_spec(module) is None];missing and (print('Missing build dependencies: '+', '.join(missing),file=sys.stderr) or sys.exit(2));struct.calcsize('P')*8==64 or (print('A 64-bit Python interpreter is required for the x64 release.',file=sys.stderr) or sys.exit(3));print(sys.version.split()[0])"
 
 Write-Host "Checking the project virtual environment..."
 Invoke-CheckedCommand -FilePath $pythonPath -ArgumentList @("-c", $dependencyCheck) -FailureMessage "dependency check failed. Install them with: .\.venv\Scripts\python.exe -m pip install -r .\packaging\windows\requirements-build.txt"

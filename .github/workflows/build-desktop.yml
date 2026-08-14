@@ -123,12 +123,12 @@ jobs:
           key: graphviz-windows-x64-15.1.0-c3ee71ff81ab97352082225574a140f20f5d6929d5f33d1097a1fe0e4161962a
 
       - name: Create the build environment
-        shell: pwsh
+        shell: powershell
         run: |
           & .\packaging\windows\prepare.ps1
 
       - name: Build portable ZIP and installer
-        shell: pwsh
+        shell: powershell
         env:
           APP_VERSION: ${{ needs.checks.outputs.version }}
         run: |

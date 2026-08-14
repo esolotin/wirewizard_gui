@@ -14,18 +14,10 @@ function Get-PythonInformation {
         [string[]]$PrefixArguments = @()
     )
 
-    $probe = @'
-import json
-import struct
-import sys
-
-print(json.dumps({
-    "version": ".".join(str(part) for part in sys.version_info[:3]),
-    "bits": struct.calcsize("P") * 8,
-    "executable": sys.executable,
-    "is_venv": sys.prefix != sys.base_prefix,
-}, separators=(",", ":")))
-'@
+    # Windows PowerShell 5.1 can strip embedded double quotes when it builds a
+    # native command line. Keep the Python probe on one line and use only
+    # single-quoted Python literals so python -c receives it unchanged.
+    $probe = "import json,struct,sys;print(json.dumps({'version':'.'.join(str(part) for part in sys.version_info[:3]),'bits':struct.calcsize('P')*8,'executable':sys.executable,'is_venv':sys.prefix!=sys.base_prefix},separators=(',',':')))"
 
     try {
         $output = @(& $FilePath @PrefixArguments "-c" $probe 2>&1)
