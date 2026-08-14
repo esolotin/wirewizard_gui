@@ -440,6 +440,7 @@ class MainWindow(QMainWindow):
 
     def _on_tree_selection_changed(self) -> None:
         self._save_current_editor()
+        self.svg_preview.set_highlight(None)
         with self._suspend_change_tracking():
             self._current_reference_item = None
             items = self.project_tree.selectedItems()
@@ -458,14 +459,17 @@ class MainWindow(QMainWindow):
                 self.connector_editor.load_item(obj)
                 self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(2)
+                self.svg_preview.set_highlight(obj.name)
             elif kind == "cable":
                 self.cable_editor.load_item(obj)
                 self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(3)
+                self.svg_preview.set_highlight(obj.name)
             elif kind == "ferrule":
                 self.ferrule_editor.load_item(obj)
                 self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(4)
+                self.svg_preview.set_highlight(obj.name)
             elif kind == "connections":
                 self.connections_editor.load_items(obj)
                 self.editor_stack.setCurrentIndex(5)

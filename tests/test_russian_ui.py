@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -102,6 +104,58 @@ class RussianUiTests(unittest.TestCase):
 
         self.assertGreaterEqual(editor.table.columnCount(), 13)
         self.assertEqual([item.route for item in saved], routes)
+
+    def test_svg_preview_zoom_highlight_and_export(self) -> None:
+        from wirewizard_gui.ui.panels.svg_preview import SvgPreviewPanel
+
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
+        <g id="node1"><polygon points="1,1 119,1 119,79 1,79" stroke="black"/>
+        <text x="10" y="30">X1</text></g></svg>"""
+        panel = SvgPreviewPanel()
+        self.addCleanup(panel.close)
+        panel.resize(400, 300)
+        panel.show_svg(svg)
+        initial_scale = panel.view.transform().m11()
+        panel.view.scale(1.2, 1.2)
+        self.assertGreater(panel.view.transform().m11(), initial_scale)
+        panel.fit_to_view()
+
+        panel.set_highlight("X1")
+        self.assertIn("#e53935", panel._display_svg)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            svg_path = Path(tmp) / "preview.svg"
+            png_path = Path(tmp) / "preview.png"
+            with patch(
+                "wirewizard_gui.ui.panels.svg_preview.QFileDialog.getSaveFileName",
+                return_value=(str(svg_path), ""),
+            ):
+                panel.save_svg()
+            with patch(
+                "wirewizard_gui.ui.panels.svg_preview.QFileDialog.getSaveFileName",
+                return_value=(str(png_path), ""),
+            ):
+                panel.save_png()
+
+            self.assertIn("#e53935", svg_path.read_text(encoding="utf-8"))
+            self.assertGreater(png_path.stat().st_size, 0)
+
+    def test_main_window_selection_highlights_rendered_component(self) -> None:
+        from wirewizard_gui.ui.main_window import MainWindow
+
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
+        <g><rect width="120" height="80"/><text x="10" y="30">X1</text></g></svg>"""
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            return_value=(True, "Готово", svg),
+        ):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        connector = window.project_tree.topLevelItem(0).child(0).child(0)
+
+        window.project_tree.setCurrentItem(connector)
+
+        self.assertIn("#e53935", window.svg_preview._display_svg)
 
     def test_daisy_chain_limit_signal_is_connected_once(self) -> None:
         from wirewizard_gui.domain.models import CableModel, ConnectorModel
