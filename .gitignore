@@ -21,4 +21,7 @@ packaging/windows/vendor/*
 .mypy_cache/
 .ruff_cache/
 
+.vscode/*
+!.vscode/tasks.json
+
 *.log
