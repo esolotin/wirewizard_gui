@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=WireWizard GUI
+GenericName=Wire harness editor
+Comment=Design and render WireViz wiring projects
+Exec=wirewizard-gui
+Icon=wirewizard-gui
+Terminal=false
+Categories=Engineering;Graphics;
+StartupNotify=true
+Keywords=wire;wiring;harness;WireViz;Graphviz;

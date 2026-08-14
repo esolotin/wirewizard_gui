@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -eu
+
+appdir="$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd -P)"
+XDG_DATA_DIRS="${appdir}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_DATA_DIRS
+WIREWIZARD_PORTABLE=1
+export WIREWIZARD_PORTABLE
+if [ -n "${APPIMAGE:-}" ] && [ -z "${WIREWIZARD_DATA_DIR:-}" ]; then
+    # AppImage's mounted AppDir is read-only. Keep persistent portable state in
+    # a sidecar directory next to the .AppImage instead.
+    WIREWIZARD_DATA_DIR="${APPIMAGE}.data"
+    export WIREWIZARD_DATA_DIR
+fi
+
+exec "${appdir}/usr/lib/wirewizard-gui/WireWizardGUI" "$@"

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="WireWizard GUI">
+  <defs>
+    <linearGradient id="background" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#263b73"/>
+      <stop offset="1" stop-color="#111b38"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#background)"/>
+  <path d="M50 80h35l31 48-31 48H50" fill="none" stroke="#52d3ff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M206 80h-35l-31 48 31 48h35" fill="none" stroke="#ffb84d" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="128" cy="128" r="19" fill="#f6f8ff"/>
+  <circle cx="50" cy="80" r="10" fill="#52d3ff"/>
+  <circle cx="50" cy="176" r="10" fill="#52d3ff"/>
+  <circle cx="206" cy="80" r="10" fill="#ffb84d"/>
+  <circle cx="206" cy="176" r="10" fill="#ffb84d"/>
+</svg>
