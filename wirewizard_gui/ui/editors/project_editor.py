@@ -14,8 +14,8 @@ class ProjectEditor(QWidget):
         self.description_edit = QPlainTextEdit()
 
         layout = QFormLayout(self)
-        layout.addRow("Title", self.title_edit)
-        layout.addRow("Description", self.description_edit)
+        layout.addRow("Название", self.title_edit)
+        layout.addRow("Описание", self.description_edit)
 
     def load_item(self, item: ProjectModel) -> None:
         self.current_item = item
@@ -25,5 +25,5 @@ class ProjectEditor(QWidget):
     def save_to_item(self) -> None:
         if not self.current_item:
             return
-        self.current_item.title = self.title_edit.text().strip() or "Untitled harness"
+        self.current_item.title = self.title_edit.text().strip() or "Новый жгут"
         self.current_item.description = self.description_edit.toPlainText().strip()

@@ -29,22 +29,22 @@ class CableEditor(QWidget):
         self.colors_edit = QLineEdit()
         self.color_code_combo = build_combo(COLOR_CODES)
         self.wirelabels_edit = QLineEdit()
-        self.shield_check = QCheckBox("Shield")
-        self.bundle_check = QCheckBox("Bundle")
+        self.shield_check = QCheckBox("Экран")
+        self.bundle_check = QCheckBox("Пучок")
         self.notes_edit = QPlainTextEdit()
 
         layout = QFormLayout(self)
-        layout.addRow("Name", self.name_edit)
-        layout.addRow("Type", self.type_combo)
-        layout.addRow("Gauge", self.gauge_combo)
-        layout.addRow("Length", self.length_combo)
-        layout.addRow("Wire count", self.wirecount_spin)
-        layout.addRow("Colors (comma separated)", self.colors_edit)
-        layout.addRow("Color code", self.color_code_combo)
-        layout.addRow("Wire labels (comma separated)", self.wirelabels_edit)
+        layout.addRow("Обозначение", self.name_edit)
+        layout.addRow("Тип", self.type_combo)
+        layout.addRow("Сечение", self.gauge_combo)
+        layout.addRow("Длина", self.length_combo)
+        layout.addRow("Количество жил", self.wirecount_spin)
+        layout.addRow("Цвета жил (через запятую)", self.colors_edit)
+        layout.addRow("Стандарт цветов", self.color_code_combo)
+        layout.addRow("Метки жил (через запятую)", self.wirelabels_edit)
         layout.addRow("", self.shield_check)
         layout.addRow("", self.bundle_check)
-        layout.addRow("Notes", self.notes_edit)
+        layout.addRow("Примечания", self.notes_edit)
 
     def load_item(self, item: CableModel) -> None:
         self.current_item = item
@@ -64,7 +64,7 @@ class CableEditor(QWidget):
         if not self.current_item:
             return
         self.current_item.name = self.name_edit.text().strip() or "W?"
-        self.current_item.type = self.type_combo.currentText().strip() or "Generic cable"
+        self.current_item.type = self.type_combo.currentText().strip() or "Универсальный кабель"
         self.current_item.gauge = self.gauge_combo.currentText().strip() or "0.25 mm2"
         self.current_item.length = self.length_combo.currentText().strip() or "1 m"
         self.current_item.wirecount = self.wirecount_spin.value()

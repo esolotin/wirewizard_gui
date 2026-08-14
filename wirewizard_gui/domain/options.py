@@ -1,30 +1,30 @@
 from __future__ import annotations
 
 CONNECTOR_TYPES = [
-    "Generic connector",
+    "Универсальный разъём",
     "Molex KK 254",
     "JST XH",
     "JST PH",
     "Dupont 2.54",
-    "Terminal block",
-    "Ring terminal",
+    "Клеммная колодка",
+    "Кольцевой наконечник",
 ]
 
 CONNECTOR_SUBTYPES = [
     "",
-    "male",
-    "female",
-    "plug",
-    "socket",
+    "штыревой",
+    "гнездовой",
+    "вилка",
+    "розетка",
 ]
 
 CABLE_TYPES = [
-    "Generic cable",
-    "Hook-up wire",
-    "Twisted pair",
-    "Ribbon cable",
-    "Bootlace bundle",
-    "Shielded cable",
+    "Универсальный кабель",
+    "Монтажный провод",
+    "Витая пара",
+    "Ленточный кабель",
+    "Пучок проводов",
+    "Экранированный кабель",
 ]
 
 GAUGES = [
@@ -69,8 +69,8 @@ WIRE_COLORS = [
 ]
 
 FERRULE_TYPES = [
-    "Crimp ferrule",
-    "Twin ferrule",
+    "Обжимной наконечник",
+    "Двойной обжимной наконечник",
 ]
 
 FERRULE_SUBTYPES = [

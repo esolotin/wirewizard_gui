@@ -2,10 +2,13 @@
 Type=Application
 Name=WireWizard GUI
 GenericName=Wire harness editor
+GenericName[ru]=Редактор кабельных жгутов
 Comment=Design and render WireViz wiring projects
+Comment[ru]=Проектирование и визуализация схем соединений WireViz
 Exec=wirewizard-gui
 Icon=wirewizard-gui
 Terminal=false
 Categories=Engineering;Graphics;
 StartupNotify=true
 Keywords=wire;wiring;harness;WireViz;Graphviz;
+Keywords[ru]=провод;проводка;жгут;схема;WireViz;Graphviz;

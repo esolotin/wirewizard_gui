@@ -19,11 +19,11 @@ class FerruleEditor(QWidget):
         self.notes_edit = QPlainTextEdit()
 
         layout = QFormLayout(self)
-        layout.addRow("Name", self.name_edit)
-        layout.addRow("Type", self.type_combo)
-        layout.addRow("Subtype", self.subtype_combo)
-        layout.addRow("Color", self.color_combo)
-        layout.addRow("Notes", self.notes_edit)
+        layout.addRow("Обозначение", self.name_edit)
+        layout.addRow("Тип", self.type_combo)
+        layout.addRow("Подтип", self.subtype_combo)
+        layout.addRow("Цвет", self.color_combo)
+        layout.addRow("Примечания", self.notes_edit)
 
     def load_item(self, item: FerruleModel) -> None:
         self.current_item = item
@@ -37,7 +37,7 @@ class FerruleEditor(QWidget):
         if not self.current_item:
             return
         self.current_item.name = self.name_edit.text().strip() or "F?"
-        self.current_item.type = self.type_combo.currentText().strip() or "Crimp ferrule"
+        self.current_item.type = self.type_combo.currentText().strip() or "Обжимной наконечник"
         self.current_item.subtype = self.subtype_combo.currentText().strip() or "0.5 mm²"
         self.current_item.color = self.color_combo.currentText().strip()
         self.current_item.notes = self.notes_edit.toPlainText().strip()

@@ -9,7 +9,7 @@ class SvgPreviewPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self.info_label = QLabel("SVG preview пока не построен.")
+        self.info_label = QLabel("Предпросмотр SVG пока не построен.")
         self.info_label.setAlignment(Qt.AlignCenter)
         self.info_label.setWordWrap(True)
 

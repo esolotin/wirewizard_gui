@@ -115,34 +115,39 @@ class ProjectSerializer:
     def from_wireviz_yaml(text: str) -> ProjectModel:
         raw = yaml.safe_load(text) or {}
         if not isinstance(raw, dict):
-            raise ValueError("YAML root must be a mapping/object")
+            raise ValueError("Корневой элемент YAML должен быть объектом")
         return ProjectSerializer.from_wireviz_dict(raw)
 
     @staticmethod
     def from_wireviz_dict(data: dict[str, Any]) -> ProjectModel:
         metadata = data.get("metadata") or {}
-        title = metadata.get("title", "Imported harness") if isinstance(metadata, dict) else "Imported harness"
+        title = metadata.get("title", "Импортированный жгут") if isinstance(metadata, dict) else "Импортированный жгут"
         description = metadata.get("description", "") if isinstance(metadata, dict) else ""
 
         project = ProjectModel(title=title, description=description)
 
         connectors_data = data.get("connectors") or {}
         if not isinstance(connectors_data, dict):
-            raise ValueError("'connectors' must be a mapping")
+            raise ValueError("Раздел 'connectors' должен быть объектом")
 
         for name, entry in connectors_data.items():
             entry = entry or {}
             if not isinstance(entry, dict):
                 entry = {"type": str(entry)}
             is_simple = entry.get("style") == "simple"
-            type_text = str(entry.get("type", "Generic connector"))
+            type_text = str(entry.get("type", "Универсальный разъём"))
             subtype = str(entry.get("subtype", "") or "")
             color = str(entry.get("color", "") or "")
             notes = str(entry.get("notes", "") or "")
             pins = ProjectSerializer._string_list(entry.get("pins"))
             pinlabels = ProjectSerializer._string_list(entry.get("pinlabels") or entry.get("pinout"))
 
-            if is_simple and (str(name).upper().startswith("F") or "ferrule" in type_text.lower()):
+            ferrule_type = type_text.lower()
+            if is_simple and (
+                str(name).upper().startswith("F")
+                or "ferrule" in ferrule_type
+                or "наконечник" in ferrule_type
+            ):
                 project.ferrules.append(
                     FerruleModel(
                         name=str(name),
@@ -170,7 +175,7 @@ class ProjectSerializer:
 
         cables_data = data.get("cables") or {}
         if not isinstance(cables_data, dict):
-            raise ValueError("'cables' must be a mapping")
+            raise ValueError("Раздел 'cables' должен быть объектом")
 
         for name, entry in cables_data.items():
             entry = entry or {}
@@ -182,7 +187,7 @@ class ProjectSerializer:
             project.cables.append(
                 CableModel(
                     name=str(name),
-                    type=str(entry.get("type", "Generic cable")),
+                    type=str(entry.get("type", "Универсальный кабель")),
                     gauge=str(entry.get("gauge", "0.25 mm2")),
                     length=str(entry.get("length", "1 m")),
                     wirecount=wirecount,
@@ -197,7 +202,7 @@ class ProjectSerializer:
 
         connections_data = data.get("connections") or []
         if not isinstance(connections_data, list):
-            raise ValueError("'connections' must be a list")
+            raise ValueError("Раздел 'connections' должен быть списком")
         for row in connections_data:
             if not isinstance(row, list):
                 continue

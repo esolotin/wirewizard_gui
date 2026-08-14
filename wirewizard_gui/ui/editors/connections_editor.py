@@ -54,7 +54,7 @@ class _RouteCell(QWidget):
         self.component_combo.clear()
         self.component_combo.addItem("")
         for name, kind, _values in ordered_components:
-            label = name if kind != "ferrule" else f"{name} (ferrule)"
+            label = name if kind != "ferrule" else f"{name} (наконечник)"
             self.component_combo.addItem(label, userData=name)
         self.component_combo.blockSignals(False)
         self.set_component(current_component)
@@ -126,15 +126,15 @@ class ConnectionsEditor(QWidget):
         self.table.verticalHeader().setVisible(True)
 
         self.help_label = QLabel(
-            "Табличный редактор соединений. В каждой ячейке выбери компонент и индекс pin/wire. "
-            "Пустые хвостовые ячейки игнорируются; для shield используй значение 's'."
+            "Табличный редактор соединений. В каждой ячейке выберите компонент и номер контакта или жилы. "
+            "Пустые конечные ячейки игнорируются; для экрана используйте значение 's'."
         )
         self.help_label.setWordWrap(True)
 
-        self.add_btn = QPushButton("Add Row")
-        self.duplicate_btn = QPushButton("Duplicate Selected")
-        self.remove_btn = QPushButton("Remove Selected")
-        self.compact_btn = QPushButton("Compact Row")
+        self.add_btn = QPushButton("Добавить строку")
+        self.duplicate_btn = QPushButton("Дублировать выбранное")
+        self.remove_btn = QPushButton("Удалить выбранное")
+        self.compact_btn = QPushButton("Убрать пропуски")
         self.add_btn.clicked.connect(self.add_row)
         self.duplicate_btn.clicked.connect(self.duplicate_selected)
         self.remove_btn.clicked.connect(self.remove_selected)
@@ -144,7 +144,7 @@ class ConnectionsEditor(QWidget):
         self.steps_spin.setRange(3, self.MAX_STEPS)
         self.steps_spin.setSingleStep(2)
         self.steps_spin.setValue(self.visible_steps)
-        self.steps_spin.setPrefix("Visible steps: ")
+        self.steps_spin.setPrefix("Видимых шагов: ")
         self.steps_spin.valueChanged.connect(self._set_visible_steps)
 
         controls = QHBoxLayout()
@@ -243,7 +243,7 @@ class ConnectionsEditor(QWidget):
         return options
 
     def _rebuild_headers(self) -> None:
-        self.table.setHorizontalHeaderLabels([f"Step {idx}" for idx in range(1, self.MAX_STEPS + 1)])
+        self.table.setHorizontalHeaderLabels([f"Шаг {idx}" for idx in range(1, self.MAX_STEPS + 1)])
         self.table.horizontalHeader().setStretchLastSection(False)
         for col in range(self.MAX_STEPS):
             self.table.setColumnWidth(col, 220)

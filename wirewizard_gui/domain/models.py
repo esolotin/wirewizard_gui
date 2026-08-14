@@ -7,7 +7,7 @@ from typing import Any
 @dataclass
 class ConnectorModel:
     name: str
-    type: str = "Generic connector"
+    type: str = "Универсальный разъём"
     subtype: str = ""
     pincount: int = 2
     pins: list[str] = field(default_factory=list)
@@ -20,7 +20,7 @@ class ConnectorModel:
 @dataclass
 class CableModel:
     name: str
-    type: str = "Generic cable"
+    type: str = "Универсальный кабель"
     gauge: str = "0.25 mm2"
     length: str = "1 m"
     wirecount: int = 2
@@ -35,7 +35,7 @@ class CableModel:
 @dataclass
 class FerruleModel:
     name: str
-    type: str = "Crimp ferrule"
+    type: str = "Обжимной наконечник"
     subtype: str = "0.5 mm²"
     color: str = ""
     notes: str = ""
@@ -48,7 +48,7 @@ class ConnectionRowModel:
 
 @dataclass
 class ProjectModel:
-    title: str = "Untitled harness"
+    title: str = "Новый жгут"
     description: str = ""
     connectors: list[ConnectorModel] = field(default_factory=list)
     cables: list[CableModel] = field(default_factory=list)
@@ -61,7 +61,7 @@ class ProjectModel:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectModel":
         return cls(
-            title=data.get("title", "Untitled harness"),
+            title=data.get("title", "Новый жгут"),
             description=data.get("description", ""),
             connectors=[ConnectorModel(**item) for item in data.get("connectors", [])],
             cables=[CableModel(**item) for item in data.get("cables", [])],

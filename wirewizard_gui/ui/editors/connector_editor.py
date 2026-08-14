@@ -28,20 +28,20 @@ class ConnectorEditor(QWidget):
         self.pins_edit = QLineEdit()
         self.pinlabels_edit = QLineEdit()
         self.color_combo = build_combo(WIRE_COLORS)
-        self.simple_check = QCheckBox("Simple connector")
+        self.simple_check = QCheckBox("Упрощённый разъём")
         self.notes_edit = QPlainTextEdit()
         self.simple_check.toggled.connect(self._update_simple_state)
 
         layout = QFormLayout(self)
-        layout.addRow("Name", self.name_edit)
-        layout.addRow("Type", self.type_combo)
-        layout.addRow("Subtype", self.subtype_combo)
-        layout.addRow("Pin count", self.pincount_spin)
-        layout.addRow("Pins / designators (comma separated)", self.pins_edit)
-        layout.addRow("Pin labels (comma separated)", self.pinlabels_edit)
-        layout.addRow("Color", self.color_combo)
+        layout.addRow("Обозначение", self.name_edit)
+        layout.addRow("Тип", self.type_combo)
+        layout.addRow("Подтип", self.subtype_combo)
+        layout.addRow("Количество контактов", self.pincount_spin)
+        layout.addRow("Контакты / обозначения (через запятую)", self.pins_edit)
+        layout.addRow("Метки контактов (через запятую)", self.pinlabels_edit)
+        layout.addRow("Цвет", self.color_combo)
         layout.addRow("", self.simple_check)
-        layout.addRow("Notes", self.notes_edit)
+        layout.addRow("Примечания", self.notes_edit)
 
     def _update_simple_state(self, checked: bool) -> None:
         self.pincount_spin.setEnabled(not checked)
@@ -65,7 +65,7 @@ class ConnectorEditor(QWidget):
         if not self.current_item:
             return
         self.current_item.name = self.name_edit.text().strip() or "X?"
-        self.current_item.type = self.type_combo.currentText().strip() or "Generic connector"
+        self.current_item.type = self.type_combo.currentText().strip() or "Универсальный разъём"
         self.current_item.subtype = self.subtype_combo.currentText().strip()
         self.current_item.pincount = self.pincount_spin.value()
         self.current_item.pins = [x.strip() for x in self.pins_edit.text().split(",") if x.strip()]
