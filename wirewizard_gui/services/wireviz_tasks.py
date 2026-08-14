@@ -44,7 +44,11 @@ class WireVizTask(QRunnable):
                     self.project, self.output_dir, self.base_name
                 )
                 self.signals.finished.emit(
-                    self.kind, self.request_id, ok, message, generated
+                    self.kind,
+                    self.request_id,
+                    ok,
+                    message,
+                    {"output_dir": str(self.output_dir), "files": generated},
                 )
                 return
             self.signals.finished.emit(

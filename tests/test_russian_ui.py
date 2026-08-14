@@ -153,6 +153,49 @@ class RussianUiTests(unittest.TestCase):
             self.assertIn("#e53935", svg_path.read_text(encoding="utf-8"))
             self.assertGreater(png_path.stat().st_size, 0)
 
+    def test_results_panel_opens_wireviz_output_formats(self) -> None:
+        from PySide6.QtGui import QPainter, QPdfWriter, QPixmap
+
+        from wirewizard_gui.ui.panels.results import ResultsPanel
+
+        panel = ResultsPanel()
+        self.addCleanup(panel.close)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "harness.bom.tsv").write_text("id\tdescription\n1\tTest", encoding="utf-8")
+            (root / "harness.bom.csv").write_text("id,description\n1,Test", encoding="utf-8")
+            (root / "harness.html").write_text("<h1>Harness</h1>", encoding="utf-8")
+            (root / "harness.svg").write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg"><text>Harness</text></svg>',
+                encoding="utf-8",
+            )
+            pixmap = QPixmap(20, 20)
+            pixmap.fill()
+            pixmap.save(str(root / "harness.png"))
+            writer = QPdfWriter(str(root / "harness.pdf"))
+            painter = QPainter(writer)
+            painter.drawText(20, 20, "Harness")
+            painter.end()
+            filenames = [path.name for path in root.iterdir()]
+
+            panel.show_results(root, filenames)
+
+            try:
+                self.assertEqual(panel.files.count(), 6)
+                for row in range(panel.files.count()):
+                    panel.files.setCurrentRow(row)
+                    self.app.processEvents()
+                pdf_row = next(
+                    row
+                    for row in range(panel.files.count())
+                    if panel.files.item(row).text().endswith(".pdf")
+                )
+                panel.files.setCurrentRow(pdf_row)
+                self.app.processEvents()
+                self.assertIs(panel.preview.currentWidget(), panel.pdf)
+            finally:
+                panel.release_files()
+
     def test_main_window_selection_highlights_rendered_component(self) -> None:
         from wirewizard_gui.ui.main_window import MainWindow
 

@@ -19,7 +19,7 @@ from wirewizard_gui.runtime import (
 logger = logging.getLogger(__name__)
 
 WireVizParse = Callable[..., Any]
-DEFAULT_OUTPUT_FORMATS = ("html", "png", "svg", "tsv")
+DEFAULT_OUTPUT_FORMATS = ("html", "png", "svg", "pdf", "csv", "tsv")
 
 
 class WireVizDependencyError(RuntimeError):

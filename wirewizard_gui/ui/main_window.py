@@ -49,6 +49,7 @@ from wirewizard_gui.ui.editors.ferrule_editor import FerruleEditor
 from wirewizard_gui.ui.editors.project_editor import ProjectEditor
 from wirewizard_gui.ui.panels.svg_preview import SvgPreviewPanel
 from wirewizard_gui.ui.panels.problems import ProblemsPanel
+from wirewizard_gui.ui.panels.results import ResultsPanel
 from wirewizard_gui.ui.panels.yaml_preview import YamlPreviewPanel
 
 
@@ -123,6 +124,13 @@ class MainWindow(QMainWindow):
         self.problems_dock.setObjectName("problems_dock")
         self.problems_dock.setWidget(self.problems_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.problems_dock)
+
+        self.results_panel = ResultsPanel()
+        self.results_dock = QDockWidget("Результаты WireViz", self)
+        self.results_dock.setObjectName("results_dock")
+        self.results_dock.setWidget(self.results_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.results_dock)
+        self.results_dock.hide()
 
         self.render_progress = QProgressBar()
         self.render_progress.setRange(0, 0)
@@ -731,6 +739,7 @@ class MainWindow(QMainWindow):
         output_dir = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов WireViz")
         if not output_dir:
             return
+        self.results_panel.release_files()
         request_id = self._next_wireviz_request_id()
         task = WireVizTask("full", request_id, self.project, output_dir, safe_name)
         self._submit_wireviz_task(task)
@@ -991,6 +1000,13 @@ class MainWindow(QMainWindow):
             self.toolbar_buttons["Построить в WireViz"].setEnabled(True)
             if ok:
                 self.statusBar().showMessage(message, 6000)
+                if isinstance(payload, dict):
+                    self.results_panel.show_results(
+                        str(payload.get("output_dir", "")),
+                        list(payload.get("files", [])),
+                    )
+                    self.results_dock.show()
+                    self.results_dock.raise_()
                 QMessageBox.information(self, "Построение в WireViz", message)
             else:
                 QMessageBox.critical(self, "Построение в WireViz", message)

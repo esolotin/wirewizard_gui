@@ -145,7 +145,14 @@ class WireVizServiceTests(unittest.TestCase):
 
             def fake_parse(input_path: Path, **kwargs: object) -> None:
                 self.assertEqual(input_path, output_dir / "harness.yml")
-                for suffix in (".html", ".png", ".svg", ".bom.tsv"):
+                for suffix in (
+                    ".html",
+                    ".png",
+                    ".svg",
+                    ".pdf",
+                    ".bom.csv",
+                    ".bom.tsv",
+                ):
                     (output_dir / f"harness{suffix}").write_bytes(b"output")
 
             parse = Mock(side_effect=fake_parse)
@@ -161,7 +168,14 @@ class WireVizServiceTests(unittest.TestCase):
             self.assertIn("harness.svg", message)
             self.assertEqual(
                 generated,
-                ["harness.bom.tsv", "harness.html", "harness.png", "harness.svg"],
+                [
+                    "harness.bom.csv",
+                    "harness.bom.tsv",
+                    "harness.html",
+                    "harness.pdf",
+                    "harness.png",
+                    "harness.svg",
+                ],
             )
             self.assertEqual(
                 (output_dir / "harness.yml").read_text(encoding="utf-8"),
