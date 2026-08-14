@@ -1,0 +1,496 @@
+name: Build desktop applications
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  PYTHON_VERSION: "3.13.15"
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  checks:
+    name: Tests and version checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      version: ${{ steps.project-version.outputs.version }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+            packaging/windows/requirements-build.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --requirement requirements-build.txt
+          python -m pip check
+
+      - name: Read and validate the project version
+        id: project-version
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="$(python packaging/common/check_version.py)"
+          if [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" != "v${version}" ]]; then
+            printf 'Release tag %s does not match project version v%s\n' "${REF_NAME}" "${version}" >&2
+            exit 1
+          fi
+          if [[ "${REF_TYPE}" == "tag" ]] && \
+             ! git merge-base --is-ancestor "${COMMIT_SHA}^{commit}" refs/remotes/origin/main; then
+            printf 'Release tag %s is not based on origin/main.\n' "${REF_NAME}" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
+      - name: Check Python and shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q wirewizard_gui packaging/common tests
+          bash -n \
+            packaging/linux/build.sh \
+            packaging/linux/launcher.sh \
+            packaging/linux/AppRun \
+            packaging/linux/prepare_appimage_tools.sh
+          dash -n packaging/linux/launcher.sh packaging/linux/AppRun
+
+  windows-x64:
+    name: Windows 10/11 x64
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
+    needs: checks
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+            packaging/windows/requirements-build.txt
+
+      - name: Cache the verified Graphviz archive
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: packaging/windows/.cache
+          key: graphviz-windows-x64-15.1.0-c3ee71ff81ab97352082225574a140f20f5d6929d5f33d1097a1fe0e4161962a
+
+      - name: Create the build environment
+        shell: pwsh
+        run: |
+          & .\packaging\windows\prepare.ps1
+
+      - name: Build portable ZIP and installer
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          & .\packaging\windows\build.ps1 -Version $env:APP_VERSION
+
+      - name: Smoke-test the Windows executable
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path .\packaging\windows\dist\WireWizardGUI\WireWizardGUI.exe
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing executable: $exe" }
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+              if ($process.WaitForExit(15000)) {
+                  throw "WireWizardGUI exited during startup with code $($process.ExitCode)."
+              }
+          } finally {
+              if (-not $process.HasExited) {
+                  Stop-Process -Id $process.Id -Force
+                  $process.WaitForExit()
+              }
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-windows-x64
+          path: |
+            packaging/windows/dist/WireWizardGUI-${{ needs.checks.outputs.version }}-windows-x64-portable.zip
+            packaging/windows/dist/WireWizardGUI-${{ needs.checks.outputs.version }}-windows-x64-setup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  ubuntu-x64:
+    name: Ubuntu 22.04 x86_64
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
+    needs: checks
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:22.04
+    timeout-minutes: 75
+    env:
+      APPIMAGETOOL_VERSION: "1.9.1"
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      APPIMAGE_RUNTIME_REVISION: 75849dce7cc37e4319b633df1f116ca895c71a12
+      APPIMAGE_RUNTIME_SHA256: 1cc49bcf1e2ccd593c379adb17c9f85a36d619088296504de95b1d06215aebbf
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+
+    steps:
+      - name: Install native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            bash \
+            binutils \
+            ca-certificates \
+            curl \
+            desktop-file-utils \
+            dpkg-dev \
+            file \
+            git \
+            graphviz \
+            gzip \
+            libegl1 \
+            libfontconfig1 \
+            libgl1 \
+            libglib2.0-0 \
+            libx11-6 \
+            libx11-xcb1 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxcb-xkb1 \
+            python3 \
+            python3-venv \
+            tar \
+            xauth \
+            xvfb \
+            xz-utils
+
+      - name: Check out the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download verified appimagetool
+        id: appimagetool
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_path="${RUNNER_TEMP}/appimagetool-${APPIMAGETOOL_VERSION}-x86_64.AppImage"
+          runtime_path="${RUNNER_TEMP}/type2-runtime-${APPIMAGE_RUNTIME_REVISION}-x86_64"
+          curl \
+            --fail \
+            --location \
+            --retry 5 \
+            --retry-all-errors \
+            --connect-timeout 20 \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output "${tool_path}" \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+          curl \
+            --fail \
+            --location \
+            --retry 5 \
+            --retry-all-errors \
+            --connect-timeout 20 \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output "${runtime_path}" \
+            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
+          printf '%s  %s\n' "${APPIMAGETOOL_SHA256}" "${tool_path}" | sha256sum --check --strict
+          printf '%s  %s\n' "${APPIMAGE_RUNTIME_SHA256}" "${runtime_path}" | sha256sum --check --strict
+          chmod 0755 "${tool_path}"
+          "${tool_path}" --version
+          printf 'path=%s\n' "${tool_path}" >> "${GITHUB_OUTPUT}"
+          printf 'runtime_path=%s\n' "${runtime_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build portable tarball, AppImage and DEB
+        shell: bash
+        env:
+          APPIMAGETOOL: ${{ steps.appimagetool.outputs.path }}
+          APPIMAGE_RUNTIME_FILE: ${{ steps.appimagetool.outputs.runtime_path }}
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash packaging/linux/build.sh portable appimage deb
+
+      - name: Validate Linux artifacts
+        shell: bash
+        env:
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          portable="dist/linux/WireWizardGUI-${VERSION}-linux-x86_64-portable.tar.gz"
+          appdir="dist/linux/WireWizardGUI-${VERSION}-x86_64.AppDir"
+          appimage="dist/linux/WireWizardGUI-${VERSION}-x86_64.AppImage"
+          deb="dist/linux/wirewizard-gui_${VERSION}_amd64.deb"
+
+          test -s "${portable}"
+          tar -tzf "${portable}" >/dev/null
+          test -x "${appdir}/AppRun"
+          test -x "${appimage}"
+          dpkg-deb --info "${deb}" >/dev/null
+          "${GITHUB_WORKSPACE}/build/linux/venv/bin/python" -m unittest discover -s tests -v
+
+          probe_dir="$(mktemp -d)"
+          (
+            cd "${probe_dir}"
+            env -u APPIMAGE_EXTRACT_AND_RUN \
+              "${GITHUB_WORKSPACE}/${appimage}" --appimage-extract >/dev/null
+            test -x squashfs-root/AppRun
+          )
+
+          smoke_gui() {
+            local executable="$1"
+            local log_file="$2"
+            local state_home="$3"
+            local runtime_dir status
+
+            runtime_dir="$(mktemp -d)"
+            chmod 0700 "${runtime_dir}"
+            set +e
+            XDG_RUNTIME_DIR="${runtime_dir}" \
+            XDG_STATE_HOME="${state_home}" \
+              timeout --signal=TERM --kill-after=5s 20s xvfb-run -a "${executable}"
+            status=$?
+            set -e
+            if [[ "${status}" -ne 124 && "${status}" -ne 137 ]]; then
+              printf 'WireWizardGUI exited during the Linux GUI smoke test (status %s).\n' "${status}" >&2
+              exit 1
+            fi
+            test -s "${log_file}"
+            grep -Fq 'Runtime log:' "${log_file}"
+            if grep -Eq 'WireViz preview rendering failed| ERROR | CRITICAL ' "${log_file}"; then
+              cat "${log_file}" >&2
+              exit 1
+            fi
+          }
+
+          appdir_state="$(mktemp -d)"
+          appdir_log="${appdir}/usr/lib/wirewizard-gui/data/logs/wirewizardgui.log"
+          smoke_gui "${appdir}/AppRun" "${appdir_log}" "${appdir_state}"
+
+          dpkg --install "${deb}"
+          installed_state="$(mktemp -d)"
+          installed_log="${installed_state}/wirewizardgui/logs/wirewizardgui.log"
+          smoke_gui /usr/bin/wirewizard-gui "${installed_log}" "${installed_state}"
+
+      - name: Upload Ubuntu artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-ubuntu-x86_64
+          path: |
+            dist/linux/WireWizardGUI-${{ needs.checks.outputs.version }}-linux-x86_64-portable.tar.gz
+            dist/linux/WireWizardGUI-${{ needs.checks.outputs.version }}-x86_64.AppImage
+            dist/linux/wirewizard-gui_${{ needs.checks.outputs.version }}_amd64.deb
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  collect:
+    name: Collect release files
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
+    needs:
+      - checks
+      - windows-x64
+      - ubuntu-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-windows-x64
+          path: release-files
+
+      - name: Download Ubuntu artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-ubuntu-x86_64
+          path: release-files
+
+      - name: Validate names and create checksums
+        shell: bash
+        env:
+          VERSION: ${{ needs.checks.outputs.version }}
+        working-directory: release-files
+        run: |
+          set -euo pipefail
+          expected=(
+            "WireWizardGUI-${VERSION}-windows-x64-portable.zip"
+            "WireWizardGUI-${VERSION}-windows-x64-setup.exe"
+            "WireWizardGUI-${VERSION}-linux-x86_64-portable.tar.gz"
+            "WireWizardGUI-${VERSION}-x86_64.AppImage"
+            "wirewizard-gui_${VERSION}_amd64.deb"
+          )
+          for artifact in "${expected[@]}"; do
+            test -s "${artifact}"
+          done
+          sha256sum "${expected[@]}" > SHA256SUMS.txt
+
+      - name: Upload the complete artifact set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-all
+          path: release-files/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+
+  provenance:
+    name: Attest release artifacts
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    needs:
+      - checks
+      - collect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download the complete artifact set
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-all
+          path: release-files
+
+      - name: Create build provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-checksums: release-files/SHA256SUMS.txt
+
+  draft-release:
+    name: Create draft GitHub Release
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    needs:
+      - checks
+      - collect
+      - provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the complete artifact set
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: WireWizardGUI-${{ needs.checks.outputs.version }}-all
+          path: release-files
+
+      - name: Create or update a draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          current_sha="$(gh api "repos/${GH_REPO}/commits/${TAG_NAME}" --jq '.sha')"
+          if [[ "${current_sha}" != "${EXPECTED_SHA}" ]]; then
+            printf 'Release tag %s moved from %s to %s during the build; refusing to publish.\n' \
+              "${TAG_NAME}" "${EXPECTED_SHA}" "${current_sha}" >&2
+            exit 1
+          fi
+
+          mapfile -d '' assets < <(find release-files -maxdepth 1 -type f -print0 | sort -z)
+          ((${#assets[@]} == 6))
+          mapfile -t local_names < <(printf '%s\n' "${assets[@]##*/}" | LC_ALL=C sort)
+
+          if release_json="$(gh release view "${TAG_NAME}" --json isDraft 2>/dev/null)"; then
+            if [[ "$(jq -r '.isDraft' <<<"${release_json}")" != "true" ]]; then
+              printf 'Release %s is already published; refusing to replace its files.\n' "${TAG_NAME}" >&2
+              exit 1
+            fi
+            mapfile -t existing_names < <(
+              gh release view "${TAG_NAME}" --json assets --jq '.assets[].name' | LC_ALL=C sort
+            )
+            extras="$(comm -23 <(printf '%s\n' "${existing_names[@]}") <(printf '%s\n' "${local_names[@]}"))"
+            if [[ -n "${extras}" ]]; then
+              printf 'Draft release %s has unexpected assets; refusing to overwrite it:\n%s\n' "${TAG_NAME}" "${extras}" >&2
+              exit 1
+            fi
+          else
+            gh release create "${TAG_NAME}" \
+              --draft \
+              --generate-notes \
+              --title "WireWizardGUI ${VERSION}" \
+              --verify-tag
+          fi
+
+          gh release upload "${TAG_NAME}" "${assets[@]}" --clobber
+          mapfile -t remote_names < <(
+            gh release view "${TAG_NAME}" --json assets --jq '.assets[].name' | LC_ALL=C sort
+          )
+          if ! diff -u <(printf '%s\n' "${local_names[@]}") <(printf '%s\n' "${remote_names[@]}"); then
+            printf 'Draft release %s does not contain exactly the expected assets.\n' "${TAG_NAME}" >&2
+            exit 1
+          fi
