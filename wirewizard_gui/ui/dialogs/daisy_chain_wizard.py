@@ -22,7 +22,8 @@ from wirewizard_gui.ui.editors.common import build_combo
 
 
 @dataclass
-class DaisyChainPlan:
+class BulkWiringPlan:
+    mode: str
     connectors: list[str]
     cable_template: str
     start_pin: int
@@ -30,19 +31,18 @@ class DaisyChainPlan:
     zig_zag: bool
 
 
-class DaisyChainWizard(QDialog):
+class BulkWiringWizard(QDialog):
     def __init__(self, connectors: list[ConnectorModel], cables: list[CableModel], parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Мастер шлейфового соединения")
+        self.setWindowTitle("Мастер массовой разводки")
         self.resize(460, 420)
         self._connectors = connectors
         self._cables = cables
 
         info = QLabel(
-            "Выберите не менее двух разъёмов в порядке соединения, выберите кабель "
-            "и задайте диапазон контактов.\n"
-            "Мастер создаст новые сегменты на основе выбранного шаблона кабеля "
-            "и по одной строке соединения для каждого контакта каждого сегмента."
+            "Выберите режим, не менее двух разъёмов, шаблон кабеля и диапазон "
+            "контактов. Последовательный режим соединяет соседние разъёмы, "
+            "режим «Звезда» — первый разъём с каждым следующим."
         )
         info.setWordWrap(True)
 
@@ -54,6 +54,11 @@ class DaisyChainWizard(QDialog):
             item.setSelected(True)
             self.connectors_list.addItem(item)
 
+        self.mode_combo = build_combo(
+            ["Последовательный шлейф", "Звезда"], editable=False
+        )
+        self.mode_combo.setItemData(0, "daisy_chain", Qt.UserRole)
+        self.mode_combo.setItemData(1, "star", Qt.UserRole)
         self.cable_combo = build_combo([cable.name for cable in cables], editable=False)
         self.start_pin_spin = QSpinBox()
         self.start_pin_spin.setMinimum(1)
@@ -62,7 +67,7 @@ class DaisyChainWizard(QDialog):
         self.pin_count_spin.setMinimum(1)
         self.pin_count_spin.setMaximum(999)
         self.pin_count_spin.setValue(2)
-        self.zig_zag_check = QCheckBox("Разворачивать порядок контактов в каждом втором сегменте")
+        self.zig_zag_check = QCheckBox("Разворачивать порядок контактов в каждом втором соединении")
 
         self.limit_label = QLabel()
         self.limit_label.setWordWrap(True)
@@ -70,6 +75,7 @@ class DaisyChainWizard(QDialog):
         form_widget = QWidget()
         form = QFormLayout(form_widget)
         form.addRow(info)
+        form.addRow("Режим", self.mode_combo)
         form.addRow("Порядок разъёмов", self.connectors_list)
         form.addRow("Шаблон кабеля", self.cable_combo)
         form.addRow("Начальный контакт", self.start_pin_spin)
@@ -156,24 +162,24 @@ class DaisyChainWizard(QDialog):
     def _accept(self) -> None:
         selected = self._selected_connector_models()
         if len(selected) < 2:
-            QMessageBox.warning(self, "Шлейфовое соединение", "Выберите не менее двух разъёмов.")
+            QMessageBox.warning(self, "Массовая разводка", "Выберите не менее двух разъёмов.")
             return
         cable = self._current_cable()
         if cable is None:
-            QMessageBox.warning(self, "Шлейфовое соединение", "Выберите кабель.")
+            QMessageBox.warning(self, "Массовая разводка", "Выберите кабель.")
             return
         connector_limit = min(self._connector_capacity(c) for c in selected)
         if self.start_pin_spin.value() + self.pin_count_spin.value() - 1 > connector_limit:
             QMessageBox.warning(
                 self,
-                "Шлейфовое соединение",
+                "Массовая разводка",
                 "Выбранный диапазон контактов не помещается во всех выбранных разъёмах.",
             )
             return
         if self.pin_count_spin.value() > max(1, cable.wirecount):
             QMessageBox.warning(
                 self,
-                "Шлейфовое соединение",
+                "Массовая разводка",
                 "В выбранном кабеле недостаточно жил для этого соединения.",
             )
             return
@@ -182,11 +188,17 @@ class DaisyChainWizard(QDialog):
     def selected_connectors(self) -> list[str]:
         return [connector.name for connector in self._selected_connector_models()]
 
-    def plan(self) -> DaisyChainPlan:
-        return DaisyChainPlan(
+    def plan(self) -> BulkWiringPlan:
+        return BulkWiringPlan(
+            mode=str(self.mode_combo.currentData(Qt.UserRole) or "daisy_chain"),
             connectors=self.selected_connectors(),
             cable_template=self.cable_combo.currentText().strip(),
             start_pin=self.start_pin_spin.value(),
             pin_count=self.pin_count_spin.value(),
             zig_zag=self.zig_zag_check.isChecked(),
         )
+
+
+# Совместимость для внешнего кода и старых тестов.
+DaisyChainPlan = BulkWiringPlan
+DaisyChainWizard = BulkWiringWizard

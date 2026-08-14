@@ -53,7 +53,7 @@ class RussianUiTests(unittest.TestCase):
             "Открыть проект",
             "Сохранить",
             "Построить в WireViz",
-            "Создать шлейф",
+            "Массовая разводка",
             "Обновить предпросмотр",
         }
 
@@ -74,7 +74,10 @@ class RussianUiTests(unittest.TestCase):
         self.addCleanup(dialog.close)
 
         button_texts = {button.text() for button in dialog.findChildren(QAbstractButton)}
-        self.assertEqual(dialog.windowTitle(), "Мастер шлейфового соединения")
+        self.assertEqual(dialog.windowTitle(), "Мастер массовой разводки")
+        self.assertEqual(dialog.plan().mode, "daisy_chain")
+        dialog.mode_combo.setCurrentIndex(1)
+        self.assertEqual(dialog.plan().mode, "star")
         self.assertTrue({"Создать", "Отмена"}.issubset(button_texts))
 
     def test_connections_editor_preserves_arrows_and_parallel_groups(self) -> None:

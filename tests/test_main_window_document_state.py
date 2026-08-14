@@ -4,8 +4,9 @@ from copy import deepcopy
 import os
 import threading
 import time
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -142,6 +143,40 @@ class MainWindowDocumentStateTests(unittest.TestCase):
         clone = window.project.connectors[-1]
         self.assertNotEqual(clone.id, original_id)
         self.assertEqual(len({item.id for item in window.project.connectors}), 4)
+
+    def test_star_bulk_wiring_is_generated_and_reversible(self) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        window = self._make_window()
+        cable_count = len(window.project.cables)
+        connection_count = len(window.project.connections)
+        dialog = Mock()
+        dialog.exec.return_value = QDialog.DialogCode.Accepted
+        dialog.plan.return_value = SimpleNamespace(
+            mode="star",
+            connectors=["X1", "X2", "X3"],
+            cable_template="W1",
+            start_pin=1,
+            pin_count=1,
+            zig_zag=False,
+        )
+
+        with patch(
+            "wirewizard_gui.ui.main_window.BulkWiringWizard", return_value=dialog
+        ):
+            window.open_bulk_wiring_wizard()
+        self._wait_for_wireviz(window)
+
+        self.assertEqual(len(window.project.cables), cable_count + 2)
+        self.assertEqual(len(window.project.connections), connection_count + 2)
+        generated = [row.route for row in window.project.connections[-2:]]
+        self.assertTrue(generated[0].startswith("X1:1 -> W3:1 -> X2:1"))
+        self.assertTrue(generated[1].startswith("X1:1 -> W4:1 -> X3:1"))
+
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(len(window.project.cables), cable_count)
+        self.assertEqual(len(window.project.connections), connection_count)
 
     def test_component_editor_signals_immediately_update_right_model(self) -> None:
         window = self._make_window()

@@ -40,7 +40,7 @@ from wirewizard_gui.domain.validation import IssueSeverity, ProjectValidator, Va
 from wirewizard_gui.services.project_service import ProjectService
 from wirewizard_gui.services.wireviz_service import WireVizService
 from wirewizard_gui.services.wireviz_tasks import WireVizTask
-from wirewizard_gui.ui.dialogs.daisy_chain_wizard import DaisyChainWizard
+from wirewizard_gui.ui.dialogs.daisy_chain_wizard import BulkWiringWizard
 from wirewizard_gui.ui.document_history import ProjectSnapshotCommand
 from wirewizard_gui.ui.editors.cable_editor import CableEditor
 from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
             ("Сохранить как", self.save_project_as),
             ("Экспорт YAML", self.export_yaml),
             ("Построить в WireViz", self.run_wireviz),
-            ("Создать шлейф", self.open_daisy_chain_wizard),
+            ("Массовая разводка", self.open_bulk_wiring_wizard),
             ("Обновить предпросмотр", self.refresh_preview),
         ]
         self.toolbar_buttons: dict[str, QPushButton] = {}
@@ -609,7 +609,7 @@ class MainWindow(QMainWindow):
             add_action("Добавить наконечник", self.add_ferrule)
         if kind in {"project", "group_connections", "connections", None}:
             add_action("Добавить строку соединения", self.add_connection_row)
-            add_action("Открыть мастер шлейфа", self.open_daisy_chain_wizard)
+            add_action("Открыть мастер разводки", self.open_bulk_wiring_wizard)
 
         if kind in {"connector", "cable", "ferrule"}:
             menu.addSeparator()
@@ -783,15 +783,15 @@ class MainWindow(QMainWindow):
         right = self.project.connectors[1].name if len(self.project.connectors) > 1 else left
         return f"{left}:1 -> {cable}:1 -> {right}:1"
 
-    def open_daisy_chain_wizard(self) -> None:
+    def open_bulk_wiring_wizard(self) -> None:
         self._save_current_editor()
         if len(self.project.connectors) < 2:
-            QMessageBox.warning(self, "Шлейфовое соединение", "Сначала добавьте не менее двух разъёмов.")
+            QMessageBox.warning(self, "Массовая разводка", "Сначала добавьте не менее двух разъёмов.")
             return
         if not self.project.cables:
-            QMessageBox.warning(self, "Шлейфовое соединение", "Сначала добавьте хотя бы один кабель.")
+            QMessageBox.warning(self, "Массовая разводка", "Сначала добавьте хотя бы один кабель.")
             return
-        dialog = DaisyChainWizard(
+        dialog = BulkWiringWizard(
             connectors=self.project.connectors,
             cables=self.project.cables,
             parent=self,
@@ -800,20 +800,25 @@ class MainWindow(QMainWindow):
             return
         plan = dialog.plan()
         generated: list[ConnectionRowModel] = []
-        segment_count = len(plan.connectors) - 1
-        if segment_count < 1:
+        if plan.mode == "star":
+            connector_pairs = [
+                (plan.connectors[0], target) for target in plan.connectors[1:]
+            ]
+        else:
+            connector_pairs = list(zip(plan.connectors, plan.connectors[1:]))
+        if not connector_pairs:
             return
 
         template = next((cable for cable in self.project.cables if cable.name == plan.cable_template), None)
         if template is None:
-            QMessageBox.warning(self, "Шлейфовое соединение", "Выбранный шаблон кабеля не найден.")
+            QMessageBox.warning(self, "Массовая разводка", "Выбранный шаблон кабеля не найден.")
             return
 
         before = self.project.to_dict()
 
         existing_cable_names = [item.name for item in self.project.cables]
         created_cables = []
-        for segment_index in range(segment_count):
+        for segment_index, (left, right) in enumerate(connector_pairs):
             segment_name = self._next_name("W", existing_cable_names)
             existing_cable_names.append(segment_name)
             segment_cable = deepcopy(template)
@@ -821,8 +826,6 @@ class MainWindow(QMainWindow):
             segment_cable.id = uuid4().hex
             created_cables.append(segment_cable)
 
-            left = plan.connectors[segment_index]
-            right = plan.connectors[segment_index + 1]
             reverse = plan.zig_zag and (segment_index % 2 == 1)
             for offset in range(plan.pin_count):
                 connector_pin = plan.start_pin + offset
@@ -835,13 +838,16 @@ class MainWindow(QMainWindow):
         self.project.cables.extend(created_cables)
         self.project.connections.extend(generated)
         self._update_dirty_state()
-        self._record_project_change(before, "Создание шлейфа")
+        self._record_project_change(before, "Массовая разводка")
         self._refresh_tree()
         self.refresh_preview()
         self.statusBar().showMessage(
-            f"Создано сегментов шлейфа: {len(created_cables)}; строк соединений: {len(generated)}.",
+            f"Создано кабельных сегментов: {len(created_cables)}; строк соединений: {len(generated)}.",
             5000,
         )
+
+    def open_daisy_chain_wizard(self) -> None:
+        self.open_bulk_wiring_wizard()
 
     def duplicate_selected_item(self) -> None:
         self._save_current_editor()
