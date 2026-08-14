@@ -124,9 +124,9 @@ class MainWindow(QMainWindow):
             title="Демонстрационный жгут",
             description="Простой начальный проект WireWizardGUI",
             connectors=[
-                ConnectorModel(name="X1", type="Molex KK 254", subtype="гнездовой", pincount=2, pinlabels=["A", "B"]),
-                ConnectorModel(name="X2", type="Molex KK 254", subtype="гнездовой", pincount=2, pinlabels=["A", "B"]),
-                ConnectorModel(name="X3", type="Клеммная колодка", subtype="вилка", pincount=2, pinlabels=["1", "2"]),
+                ConnectorModel(name="X1", type="Molex KK 254", subtype="female", pincount=2, pinlabels=["A", "B"]),
+                ConnectorModel(name="X2", type="Molex KK 254", subtype="female", pincount=2, pinlabels=["A", "B"]),
+                ConnectorModel(name="X3", type="Клеммная колодка", subtype="plug", pincount=2, pinlabels=["1", "2"]),
             ],
             cables=[
                 CableModel(name="W1", type="Монтажный провод", gauge="0.25 mm2", length="0.5 m", wirecount=2, colors=["RD", "BK"]),

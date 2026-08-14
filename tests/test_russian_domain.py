@@ -9,6 +9,7 @@ from wirewizard_gui.domain.models import (
     FerruleModel,
     ProjectModel,
 )
+from wirewizard_gui.domain.options import CONNECTOR_SUBTYPES
 from wirewizard_gui.domain.serializer import ProjectSerializer
 from wirewizard_gui.domain.validation import ProjectValidator
 
@@ -19,6 +20,17 @@ class RussianDomainTests(unittest.TestCase):
         self.assertEqual(ConnectorModel(name="X1").type, "Универсальный разъём")
         self.assertEqual(CableModel(name="W1").type, "Универсальный кабель")
         self.assertEqual(FerruleModel(name="F1").type, "Обжимной наконечник")
+
+    def test_connector_subtypes_keep_technical_wireviz_terms(self) -> None:
+        self.assertEqual(CONNECTOR_SUBTYPES, ["", "male", "female", "plug", "socket"])
+
+        project = ProjectModel(
+            connectors=[ConnectorModel(name="X1", subtype="female")],
+        )
+
+        data = ProjectSerializer.to_wireviz_dict(project)
+
+        self.assertEqual(data["connectors"]["X1"]["subtype"], "female")
 
     def test_russian_ferrule_type_survives_yaml_round_trip(self) -> None:
         project = ProjectModel(

@@ -12,10 +12,10 @@ CONNECTOR_TYPES = [
 
 CONNECTOR_SUBTYPES = [
     "",
-    "штыревой",
-    "гнездовой",
-    "вилка",
-    "розетка",
+    "male",
+    "female",
+    "plug",
+    "socket",
 ]
 
 CABLE_TYPES = [
