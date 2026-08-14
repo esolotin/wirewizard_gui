@@ -57,6 +57,93 @@ class RussianDomainTests(unittest.TestCase):
         self.assertTrue(all("Connection row" not in error for error in errors))
         self.assertTrue(any("Строка соединения" in error for error in errors))
 
+    def test_route_split_preserves_wireviz_arrows_and_groups(self) -> None:
+        cases = {
+            "X1:1 -> W1:1 -> X2:1": ["X1:1", "W1:1", "X2:1"],
+            "X1:1 -> -> -> X2:1": ["X1:1", "->", "X2:1"],
+            "X1:1->->->X2:1": ["X1:1", "->", "X2:1"],
+            "X1:1 -> --> -> X2:1": ["X1:1", "-->", "X2:1"],
+            "X1:1->-->->X2:1": ["X1:1", "-->", "X2:1"],
+            "X1:1 -> -->->X2:1": ["X1:1", "-->", "X2:1"],
+            "X1:1->--> -> X2:1": ["X1:1", "-->", "X2:1"],
+            "X1:1 -> <=> -> X2:1": ["X1:1", "<=>", "X2:1"],
+            "X1:1-><=>->X2:1": ["X1:1", "<=>", "X2:1"],
+            "X1:[1, 2] -> [->, -->] -> X2:[1, 2]": [
+                "X1:[1, 2]",
+                "[->, -->]",
+                "X2:[1, 2]",
+            ],
+            "X1:1->W1:1->X2:1": ["X1:1", "W1:1", "X2:1"],
+            "X1:1 ->W1:1 -> X2:1": ["X1:1", "W1:1", "X2:1"],
+            "X1:1->W1:1 -> X2:1": ["X1:1", "W1:1", "X2:1"],
+            "X1:1 -> W1:1->X2:1": ["X1:1", "W1:1", "X2:1"],
+        }
+
+        for route, expected in cases.items():
+            with self.subTest(route=route):
+                self.assertEqual(ProjectSerializer._split_route(route), expected)
+
+    def test_wireviz_connections_survive_import_and_export(self) -> None:
+        connections = [
+            [{"X1": 1}, "->", {"X2": 1}],
+            [{"X1": 1}, "-->", {"X2": 1}],
+            [{"X1": 1}, "<=>", {"X2": 1}],
+            [{"X1": [1, 2]}, ["->", "-->"], {"X2": [1, 2]}],
+            [["X1", "X2"], {"W1": [1, 2]}, {"X3": [1, 2]}],
+        ]
+        source = {
+            "connectors": {
+                "X1": {"pincount": 2},
+                "X2": {"pincount": 2},
+                "X3": {"pincount": 2},
+            },
+            "cables": {"W1": {"wirecount": 2}},
+            "connections": connections,
+        }
+
+        project = ProjectSerializer.from_wireviz_dict(source)
+        exported = ProjectSerializer.to_wireviz_dict(project)
+
+        self.assertEqual(exported["connections"], connections)
+        self.assertEqual(ProjectValidator.validate(project), [])
+
+
+    def test_validator_rejects_invalid_arrows_and_group_sizes(self) -> None:
+        project = ProjectModel(
+            connectors=[
+                ConnectorModel(name=f"X{idx}", pincount=3)
+                for idx in range(1, 5)
+            ],
+            cables=[CableModel(name="W1", wirecount=3)],
+            connections=[
+                ConnectionRowModel(route="X1:1 -> --> -> W1:1 -> X2:1"),
+                ConnectionRowModel(route="X1:1 -> -->"),
+                ConnectionRowModel(
+                    route="[X1, X2, X3] -> W1:[1, 2] -> X4:[1, 2]"
+                ),
+                ConnectionRowModel(route="X1:1-3 -> W1:1 -> X2:1"),
+            ],
+        )
+
+        errors = ProjectValidator.validate(project)
+
+        self.assertTrue(
+            any("Строка соединения 1" in error and "чередоваться" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("Строка соединения 2" in error and "последним" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("Строка соединения 3" in error and "одинаковую длину" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("Строка соединения 4" in error and "одинаковую длину" in error for error in errors),
+            errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

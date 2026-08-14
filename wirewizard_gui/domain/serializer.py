@@ -340,26 +340,50 @@ class ProjectSerializer:
         return items
 
     @staticmethod
+    def _is_arrow(value: str) -> bool:
+        return bool(re.fullmatch(r"<?(?:-+|=+)>?", str(value).strip()))
+
+    @staticmethod
     def _split_route(route: str) -> list[str]:
         parts: list[str] = []
         current: list[str] = []
         depth = 0
         idx = 0
+        arrow_with_separators = re.compile(
+            r"->\s*(<?(?:-+|=+)>?)\s*->"
+        )
+
         while idx < len(route):
             ch = route[idx]
             if ch == "[":
                 depth += 1
             elif ch == "]" and depth > 0:
                 depth -= 1
-            if depth == 0 and route[idx:idx + 2] == "->":
-                token = "".join(current).strip()
-                if token:
-                    parts.append(token)
-                current = []
-                idx += 2
-                continue
+
+            if depth == 0:
+                arrow_match = arrow_with_separators.match(route, idx)
+                if arrow_match is not None:
+                    token = "".join(current).strip()
+                    if token:
+                        parts.append(token)
+                    parts.append(arrow_match.group(1))
+                    current = []
+                    idx = arrow_match.end()
+                    continue
+
+                is_separator = route.startswith("->", idx)
+                belongs_to_longer_arrow = idx > 0 and route[idx - 1] in "-<"
+                if is_separator and not belongs_to_longer_arrow:
+                    token = "".join(current).strip()
+                    if token:
+                        parts.append(token)
+                    current = []
+                    idx += 2
+                    continue
+
             current.append(ch)
             idx += 1
+
         token = "".join(current).strip()
         if token:
             parts.append(token)

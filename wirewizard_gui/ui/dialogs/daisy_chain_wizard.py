@@ -89,6 +89,7 @@ class DaisyChainWizard(QDialog):
 
         self.connectors_list.itemSelectionChanged.connect(self._update_limits)
         self.cable_combo.currentTextChanged.connect(self._update_limits)
+        self.pin_count_spin.valueChanged.connect(self._update_limits_start_only)
         self._update_limits()
 
     def _connector_display(self, connector: ConnectorModel) -> str:
@@ -143,9 +144,8 @@ class DaisyChainWizard(QDialog):
             f"Выбрано разъёмов: {len(selected)} | Шаблон: {cable_name} | "
             f"Максимум доступных контактов за шаг: {max_pin_count}"
         )
-        self.pin_count_spin.valueChanged.connect(self._update_limits_start_only)
 
-    def _update_limits_start_only(self) -> None:
+    def _update_limits_start_only(self, _value: int | None = None) -> None:
         selected = self._selected_connector_models()
         connector_limit = min((self._connector_capacity(c) for c in selected), default=1)
         max_start = max(1, connector_limit - self.pin_count_spin.value() + 1)

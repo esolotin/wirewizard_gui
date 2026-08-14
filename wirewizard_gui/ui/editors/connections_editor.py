@@ -72,12 +72,16 @@ class _RouteCell(QWidget):
         return self.value_combo.currentText().strip()
 
     def set_component(self, name: str) -> None:
-        idx = 0
+        idx = -1
         for i in range(self.component_combo.count()):
             if self.component_combo.itemData(i) == name:
                 idx = i
                 break
-        self.component_combo.setCurrentIndex(idx)
+        if idx >= 0:
+            self.component_combo.setCurrentIndex(idx)
+        else:
+            self.component_combo.setCurrentIndex(-1)
+            self.component_combo.setEditText(name)
         self._component_changed()
 
     def set_value(self, value: str) -> None:
@@ -112,7 +116,8 @@ class _RouteCell(QWidget):
 
 
 class ConnectionsEditor(QWidget):
-    MAX_STEPS = 7
+    INITIAL_STEPS = 7
+    MAX_MANUAL_STEPS = 99
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -122,7 +127,7 @@ class ConnectionsEditor(QWidget):
         self.ferrules: list[FerruleModel] = []
         self.visible_steps = 5
 
-        self.table = QTableWidget(0, self.MAX_STEPS)
+        self.table = QTableWidget(0, self.INITIAL_STEPS)
         self.table.verticalHeader().setVisible(True)
 
         self.help_label = QLabel(
@@ -141,8 +146,8 @@ class ConnectionsEditor(QWidget):
         self.compact_btn.clicked.connect(self.compact_selected)
 
         self.steps_spin = QSpinBox()
-        self.steps_spin.setRange(3, self.MAX_STEPS)
-        self.steps_spin.setSingleStep(2)
+        self.steps_spin.setRange(3, self.MAX_MANUAL_STEPS)
+        self.steps_spin.setSingleStep(1)
         self.steps_spin.setValue(self.visible_steps)
         self.steps_spin.setPrefix("Видимых шагов: ")
         self.steps_spin.valueChanged.connect(self._set_visible_steps)
@@ -183,7 +188,7 @@ class ConnectionsEditor(QWidget):
     def add_row(self, route: str = "") -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             cell = _RouteCell(self.table)
             cell.set_component_options(self._component_options())
             self.table.setCellWidget(row, col, cell)
@@ -243,25 +248,40 @@ class ConnectionsEditor(QWidget):
         return options
 
     def _rebuild_headers(self) -> None:
-        self.table.setHorizontalHeaderLabels([f"Шаг {idx}" for idx in range(1, self.MAX_STEPS + 1)])
+        self.table.setHorizontalHeaderLabels([f"Шаг {idx}" for idx in range(1, self.table.columnCount() + 1)])
         self.table.horizontalHeader().setStretchLastSection(False)
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             self.table.setColumnWidth(col, 220)
 
     def _set_visible_steps(self, value: int) -> None:
-        if value % 2 == 0:
-            value += 1
-        self.visible_steps = max(3, min(self.MAX_STEPS, value))
+        self._ensure_step_count(value)
+        self.visible_steps = max(3, value)
         self.steps_spin.blockSignals(True)
         self.steps_spin.setValue(self.visible_steps)
         self.steps_spin.blockSignals(False)
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             self.table.setColumnHidden(col, col >= self.visible_steps)
+
+    def _ensure_step_count(self, count: int) -> None:
+        count = max(3, count)
+        old_count = self.table.columnCount()
+        if count <= old_count:
+            return
+
+        self.table.setColumnCount(count)
+        self.steps_spin.setMaximum(max(self.steps_spin.maximum(), count))
+        options = self._component_options()
+        for row in range(self.table.rowCount()):
+            for col in range(old_count, count):
+                cell = _RouteCell(self.table)
+                cell.set_component_options(options)
+                self.table.setCellWidget(row, col, cell)
+        self._rebuild_headers()
 
     def _refresh_all_cell_options(self) -> None:
         options = self._component_options()
         for row in range(self.table.rowCount()):
-            for col in range(self.MAX_STEPS):
+            for col in range(self.table.columnCount()):
                 cell = self.table.cellWidget(row, col)
                 if isinstance(cell, _RouteCell):
                     cell.set_component_options(options)
@@ -283,28 +303,29 @@ class ConnectionsEditor(QWidget):
                 cell.set_part(part)
 
     def _apply_route_to_row(self, row: int, route: str) -> None:
-        for col in range(self.MAX_STEPS):
+        parts = ProjectSerializer._split_route(route)
+        self._ensure_step_count(len(parts))
+        for col in range(self.table.columnCount()):
             cell = self.table.cellWidget(row, col)
             if isinstance(cell, _RouteCell):
                 cell.set_part(_PartModel())
-        parts = [part.strip() for part in route.split("->") if part.strip()]
-        for col, part in enumerate(parts[: self.MAX_STEPS]):
+        for col, part in enumerate(parts):
             component = part
             value = ""
-            if ":" in part:
-                component, raw_value = part.split(":", 1)
-                parsed = ProjectSerializer._parse_value(raw_value.strip())
-                value = ProjectSerializer._format_connection_value(parsed)
+            parsed = ProjectSerializer._parse_connection_part(part)
+            if isinstance(parsed, dict) and parsed:
+                component, parsed_value = next(iter(parsed.items()))
+                value = ProjectSerializer._format_connection_value(parsed_value)
             cell = self.table.cellWidget(row, col)
             if isinstance(cell, _RouteCell):
-                cell.set_part(_PartModel(component.strip(), value))
-        needed = min(self.MAX_STEPS, max(3, len(parts) if len(parts) % 2 == 1 else len(parts) + 1))
+                cell.set_part(_PartModel(str(component).strip(), value))
+        needed = max(3, len(parts))
         if needed > self.visible_steps:
             self._set_visible_steps(needed)
 
     def _route_from_row(self, row: int) -> str:
         parts: list[str] = []
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             cell = self.table.cellWidget(row, col)
             if not isinstance(cell, _RouteCell):
                 continue

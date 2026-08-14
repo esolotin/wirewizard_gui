@@ -39,6 +39,34 @@ class WireVizCompatibilityTests(unittest.TestCase):
         self.assertEqual(set(harness.connectors), {"X1", "X2"})
         self.assertEqual(set(harness.cables), {"W1"})
 
+    @unittest.skipIf(wireviz is None, "WireViz runtime dependency is not installed")
+    def test_special_arrows_are_accepted_by_pinned_wireviz(self) -> None:
+        routes = [
+            "X1:1 -> -> -> X2:1",
+            "X1:1 -> --> -> X2:1",
+            "X1:1 -> <=> -> X2:1",
+            "X1:[1, 2] -> [->, -->] -> X2:[1, 2]",
+        ]
+
+        assert wireviz is not None
+        for route in routes:
+            with self.subTest(route=route):
+                project = ProjectModel(
+                    title="Arrow compatibility smoke",
+                    connectors=[
+                        ConnectorModel(name="X1", pincount=2),
+                        ConnectorModel(name="X2", pincount=2),
+                    ],
+                    connections=[ConnectionRowModel(route=route)],
+                )
+                harness = wireviz.parse(
+                    ProjectSerializer.to_wireviz_yaml(project),
+                    return_types="harness",
+                    output_name="arrow-compatibility-smoke",
+                )
+
+                self.assertEqual(set(harness.connectors), {"X1", "X2"})
+
 
 if __name__ == "__main__":
     unittest.main()

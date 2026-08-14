@@ -45,48 +45,101 @@ class ProjectValidator:
 
             parallel_sizes: list[int] = []
             previous_kind: str | None = None
-            skip_structure_checks = any(isinstance(part, list) or part in ("<=>", "-->") for part in parts if isinstance(part, str) or isinstance(part, list))
+            structure_error = (
+                f"Строка соединения {idx}: в маршруте должны чередоваться "
+                "разъёмы и кабели или стрелки"
+            )
+            arrow_boundary_error = (
+                f"Строка соединения {idx}: стрелка не может быть первым "
+                "или последним элементом маршрута"
+            )
 
-            for part in parts:
+            for position, part in enumerate(parts):
+                current_kinds: set[str] = set()
+                contains_arrow = False
+
                 if isinstance(part, dict):
                     name, value = next(iter(part.items()))
-                    resolved = ProjectValidator._resolve_component_name(str(name), component_names, simple_template_names)
-                    size = ProjectValidator._parallel_size(value)
-                    if size > 1:
-                        parallel_sizes.append(size)
-                    if resolved is None:
-                        errors.append(f"Строка соединения {idx}: неизвестный компонент '{name}'")
-                        continue
-                    current_kind = "connector" if resolved in connector_names else "cable"
-                    if not skip_structure_checks and previous_kind == current_kind:
-                        errors.append(f"Строка соединения {idx}: в маршруте должны чередоваться разъёмы и кабели")
-                    previous_kind = current_kind
-                    ProjectValidator._validate_index_value(
-                        errors, idx, resolved, value, pin_limits, cable_map, connector_map, ferrule_names
+                    resolved = ProjectValidator._resolve_component_name(
+                        str(name), component_names, simple_template_names
                     )
-                    continue
-
-                if isinstance(part, list):
-                    for item in part:
-                        if isinstance(item, str):
-                            resolved = ProjectValidator._resolve_component_name(item, component_names, simple_template_names)
-                            if resolved is None:
-                                errors.append(f"Строка соединения {idx}: неизвестный компонент '{item}'")
-                    previous_kind = "connector"
-                    continue
-
-                if isinstance(part, str):
-                    if part in {"<=>", "-->"}:
-                        previous_kind = None
-                        continue
-                    resolved = ProjectValidator._resolve_component_name(part, component_names, simple_template_names)
+                    parallel_sizes.append(ProjectValidator._parallel_size(value))
                     if resolved is None:
-                        errors.append(f"Строка соединения {idx}: неизвестный компонент '{part}'")
-                        continue
-                    current_kind = "connector" if resolved in connector_names else "cable"
-                    if not skip_structure_checks and previous_kind == current_kind:
-                        errors.append(f"Строка соединения {idx}: в маршруте должны чередоваться разъёмы и кабели")
-                    previous_kind = current_kind
+                        errors.append(
+                            f"Строка соединения {idx}: неизвестный компонент {name!r}"
+                        )
+                    else:
+                        current_kinds.add(
+                            "connector" if resolved in connector_names else "cable_or_arrow"
+                        )
+                        ProjectValidator._validate_index_value(
+                            errors,
+                            idx,
+                            resolved,
+                            value,
+                            pin_limits,
+                            cable_map,
+                            connector_map,
+                            ferrule_names,
+                        )
+
+                elif isinstance(part, list):
+                    parallel_sizes.append(len(part))
+                    for item in part:
+                        if not isinstance(item, str):
+                            errors.append(
+                                f"Строка соединения {idx}: некорректный элемент {item!r}"
+                            )
+                            continue
+                        if ProjectSerializer._is_arrow(item):
+                            contains_arrow = True
+                            current_kinds.add("cable_or_arrow")
+                            continue
+                        resolved = ProjectValidator._resolve_component_name(
+                            item, component_names, simple_template_names
+                        )
+                        if resolved is None:
+                            errors.append(
+                                f"Строка соединения {idx}: неизвестный компонент {item!r}"
+                            )
+                            continue
+                        current_kinds.add(
+                            "connector" if resolved in connector_names else "cable_or_arrow"
+                        )
+
+                elif isinstance(part, str):
+                    if ProjectSerializer._is_arrow(part):
+                        contains_arrow = True
+                        current_kinds.add("cable_or_arrow")
+                    else:
+                        resolved = ProjectValidator._resolve_component_name(
+                            part, component_names, simple_template_names
+                        )
+                        if resolved is None:
+                            errors.append(
+                                f"Строка соединения {idx}: неизвестный компонент {part!r}"
+                            )
+                        else:
+                            current_kinds.add(
+                                "connector"
+                                if resolved in connector_names
+                                else "cable_or_arrow"
+                            )
+
+                if contains_arrow and position in {0, len(parts) - 1}:
+                    if arrow_boundary_error not in errors:
+                        errors.append(arrow_boundary_error)
+
+                if len(current_kinds) != 1:
+                    if len(current_kinds) > 1 and structure_error not in errors:
+                        errors.append(structure_error)
+                    previous_kind = None
+                    continue
+
+                current_kind = next(iter(current_kinds))
+                if previous_kind == current_kind and structure_error not in errors:
+                    errors.append(structure_error)
+                previous_kind = current_kind
 
             if parallel_sizes and len(set(parallel_sizes)) > 1:
                 errors.append(f"Строка соединения {idx}: параллельные группы контактов и жил должны иметь одинаковую длину")
@@ -115,7 +168,7 @@ class ProjectValidator:
 
     @staticmethod
     def _parallel_size(value) -> int:
-        return len(ProjectValidator._flatten_value_list(value)) if isinstance(value, list) else 1
+        return len(ProjectValidator._flatten_value_list(value))
 
     @staticmethod
     def _flatten_value_list(value) -> list:
