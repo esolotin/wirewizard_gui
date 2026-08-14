@@ -31,6 +31,7 @@ from wirewizard_gui.domain.models import (
     FerruleModel,
     ProjectModel,
 )
+from wirewizard_gui.domain.references import ProjectReferences
 from wirewizard_gui.domain.serializer import ProjectSerializer
 from wirewizard_gui.domain.validation import ProjectValidator
 from wirewizard_gui.services.project_service import ProjectService
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
         self._editor_pending = False
         self._dirty = False
         self._clean_state: dict | None = None
+        self._current_reference_item: tuple[object, str] | None = None
 
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Состав проекта"])
@@ -187,6 +189,9 @@ class MainWindow(QMainWindow):
         self.cable_editor.shield_check.toggled.connect(self._on_editor_content_changed)
         self.cable_editor.bundle_check.toggled.connect(self._on_editor_content_changed)
         self.connections_editor.content_changed.connect(self._on_editor_content_changed)
+        self.connector_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)
+        self.cable_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)
+        self.ferrule_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)
 
     def _create_demo_project(self) -> ProjectModel:
         return ProjectModel(
@@ -264,26 +269,77 @@ class MainWindow(QMainWindow):
         if self._change_tracking_depth:
             return
         self._editor_pending = True
-        self._save_current_editor()
+        self._save_current_editor(finalize_name=False)
 
-    def _save_current_editor(self) -> None:
-        if not self._editor_pending:
+    def _save_current_editor(self, *, finalize_name: bool = True) -> None:
+        if self._editor_pending:
+            idx = self.editor_stack.currentIndex()
+            try:
+                if idx == 1:
+                    self.project_editor.save_to_item()
+                elif idx == 2:
+                    self.connector_editor.save_to_item()
+                elif idx == 3:
+                    self.cable_editor.save_to_item()
+                elif idx == 4:
+                    self.ferrule_editor.save_to_item()
+                elif idx == 5:
+                    self.project.connections = self.connections_editor.save_to_items()
+            finally:
+                self._editor_pending = False
+            self._update_dirty_state()
+        if finalize_name:
+            self._commit_current_component_rename()
+
+    def _commit_current_component_rename(self) -> None:
+        if self._change_tracking_depth or self._current_reference_item is None:
             return
-        idx = self.editor_stack.currentIndex()
-        try:
-            if idx == 1:
-                self.project_editor.save_to_item()
-            elif idx == 2:
-                self.connector_editor.save_to_item()
-            elif idx == 3:
-                self.cable_editor.save_to_item()
-            elif idx == 4:
-                self.ferrule_editor.save_to_item()
-            elif idx == 5:
-                self.project.connections = self.connections_editor.save_to_items()
-        finally:
-            self._editor_pending = False
+        item, previous_name = self._current_reference_item
+        current_name = str(getattr(item, "name", "")).strip()
+        if current_name == previous_name:
+            return
+
+        all_items = [*self.project.connectors, *self.project.cables, *self.project.ferrules]
+        if any(other is not item and other.name == current_name for other in all_items):
+            with self._suspend_change_tracking():
+                item.name = previous_name
+                name_edit = self._current_component_name_edit()
+                if name_edit is not None:
+                    name_edit.setText(previous_name)
+            QMessageBox.warning(
+                self,
+                "Переименование компонента",
+                f"Обозначение {current_name!r} уже используется. Переименование отменено.",
+            )
+            self._update_dirty_state()
+            return
+
+        changed_rows = ProjectReferences.rename_component(
+            self.project, previous_name, current_name
+        )
+        self._current_reference_item = (item, current_name)
+        current_tree_item = self.project_tree.currentItem()
+        if current_tree_item is not None:
+            payload = current_tree_item.data(0, Qt.UserRole)
+            if payload and payload[1] is item:
+                current_tree_item.setText(0, current_name)
+        self.connections_editor.set_component_sources(
+            self.project.connectors, self.project.cables, self.project.ferrules
+        )
         self._update_dirty_state()
+        if changed_rows:
+            rows = ", ".join(str(index + 1) for index in changed_rows)
+            self.statusBar().showMessage(f"Ссылки обновлены в строках: {rows}", 5000)
+
+    def _current_component_name_edit(self):
+        index = self.editor_stack.currentIndex()
+        if index == 2:
+            return self.connector_editor.name_edit
+        if index == 3:
+            return self.cable_editor.name_edit
+        if index == 4:
+            return self.ferrule_editor.name_edit
+        return None
 
     def _update_dirty_state(self) -> None:
         dirty = self._clean_state is None or self.project.to_dict() != self._clean_state
@@ -311,6 +367,7 @@ class MainWindow(QMainWindow):
         try:
             with self._suspend_change_tracking():
                 self._editor_pending = False
+                self._current_reference_item = None
                 self.editor_stack.setCurrentIndex(0)
                 self.project = project
                 self.current_path = path
@@ -322,6 +379,7 @@ class MainWindow(QMainWindow):
         except BaseException:
             with self._suspend_change_tracking():
                 self._editor_pending = False
+                self._current_reference_item = None
                 self.editor_stack.setCurrentIndex(0)
                 self.project = previous_project
                 self.current_path = previous_path
@@ -374,6 +432,7 @@ class MainWindow(QMainWindow):
     def _on_tree_selection_changed(self) -> None:
         self._save_current_editor()
         with self._suspend_change_tracking():
+            self._current_reference_item = None
             items = self.project_tree.selectedItems()
             if not items:
                 self.editor_stack.setCurrentIndex(0)
@@ -388,12 +447,15 @@ class MainWindow(QMainWindow):
                 self.editor_stack.setCurrentIndex(1)
             elif kind == "connector":
                 self.connector_editor.load_item(obj)
+                self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(2)
             elif kind == "cable":
                 self.cable_editor.load_item(obj)
+                self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(3)
             elif kind == "ferrule":
                 self.ferrule_editor.load_item(obj)
+                self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(4)
             elif kind == "connections":
                 self.connections_editor.load_items(obj)
@@ -681,6 +743,13 @@ class MainWindow(QMainWindow):
         if not payload:
             return
         kind, obj = payload
+        if kind in {"connector", "cable", "ferrule"}:
+            dependent_rows = ProjectReferences.dependent_rows(self.project, obj.name)
+            if not self._confirm_component_deletion(obj.name, dependent_rows):
+                return
+            ProjectReferences.remove_dependent_rows(self.project, obj.name)
+            self._current_reference_item = None
+
         if kind == "connector":
             self.project.connectors = [x for x in self.project.connectors if x is not obj]
         elif kind == "cable":
@@ -694,6 +763,33 @@ class MainWindow(QMainWindow):
         self._update_dirty_state()
         self._refresh_tree()
         self.refresh_preview()
+
+    def _confirm_component_deletion(self, component_name: str, dependent_rows: list[int]) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Удаление компонента")
+        if dependent_rows:
+            row_numbers = ", ".join(str(index + 1) for index in dependent_rows)
+            dialog.setText(
+                f"Компонент {component_name} используется в строках {row_numbers}. "
+                "Удалить компонент вместе с этими строками?"
+            )
+            dialog.setDetailedText(
+                "\n".join(
+                    f"{index + 1}: {self.project.connections[index].route}"
+                    for index in dependent_rows
+                )
+            )
+            delete_label = "Удалить вместе со строками"
+        else:
+            dialog.setText(f"Удалить компонент {component_name}?")
+            delete_label = "Удалить"
+
+        delete_button = dialog.addButton(delete_label, QMessageBox.ButtonRole.DestructiveRole)
+        cancel_button = dialog.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        return dialog.clickedButton() is delete_button
 
     def refresh_preview(self) -> None:
         self._save_current_editor()

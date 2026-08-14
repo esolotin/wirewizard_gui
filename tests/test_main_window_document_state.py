@@ -541,6 +541,111 @@ class MainWindowDocumentStateTests(unittest.TestCase):
         self.assertTrue(event.isAccepted())
         ask.assert_not_called()
 
+    def test_component_rename_updates_exact_route_references(self) -> None:
+        from wirewizard_gui.domain.models import (
+            CableModel,
+            ConnectionRowModel,
+            ConnectorModel,
+            ProjectModel,
+        )
+        from wirewizard_gui.domain.validation import ProjectValidator
+
+        window = self._make_window()
+        project = ProjectModel(
+            connectors=[
+                ConnectorModel(name="X1"),
+                ConnectorModel(name="X10"),
+            ],
+            cables=[CableModel(name="W1")],
+            connections=[
+                ConnectionRowModel(route="X1:1 -> W1:1 -> X10:1"),
+                ConnectionRowModel(route="X10:2 -> W1:2 -> X10:1"),
+            ],
+        )
+        window._install_project(project, None, dirty=False)
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+
+        window.connector_editor.name_edit.setText("X2")
+        window.connector_editor.name_edit.editingFinished.emit()
+
+        self.assertEqual(project.connectors[0].name, "X2")
+        self.assertEqual(
+            [row.route for row in project.connections],
+            ["X2:1 -> W1:1 -> X10:1", "X10:2 -> W1:2 -> X10:1"],
+        )
+        self.assertEqual(connector_node.text(0), "X2")
+        self.assertTrue(window._dirty)
+        self.assertFalse(
+            any("неизвестный компонент" in error for error in ProjectValidator.validate(project))
+        )
+
+    def test_duplicate_component_name_is_rejected_without_touching_routes(self) -> None:
+        window = self._make_window()
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+        original_routes = [row.route for row in window.project.connections]
+
+        with patch("wirewizard_gui.ui.main_window.QMessageBox.warning") as warning:
+            window.connector_editor.name_edit.setText("X2")
+            window.connector_editor.name_edit.editingFinished.emit()
+
+        warning.assert_called_once()
+        self.assertEqual(window.project.connectors[0].name, "X1")
+        self.assertEqual(window.connector_editor.name_edit.text(), "X1")
+        self.assertEqual([row.route for row in window.project.connections], original_routes)
+        self.assertFalse(window._dirty)
+
+    def test_component_delete_removes_only_confirmed_dependent_rows(self) -> None:
+        from wirewizard_gui.domain.models import (
+            CableModel,
+            ConnectionRowModel,
+            ConnectorModel,
+            ProjectModel,
+        )
+        from wirewizard_gui.domain.validation import ProjectValidator
+
+        window = self._make_window()
+        project = ProjectModel(
+            connectors=[ConnectorModel(name="X1"), ConnectorModel(name="X10")],
+            cables=[CableModel(name="W1")],
+            connections=[
+                ConnectionRowModel(route="X1:1 -> W1:1 -> X10:1"),
+                ConnectionRowModel(route="X10:1 -> W1:1 -> X10:2"),
+            ],
+        )
+        window._install_project(project, None, dirty=False)
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+
+        with patch.object(
+            window, "_confirm_component_deletion", return_value=True
+        ) as confirm:
+            window.delete_selected_item()
+
+        confirm.assert_called_once_with("X1", [0])
+        self.assertEqual([item.name for item in project.connectors], ["X10"])
+        self.assertEqual(
+            [row.route for row in project.connections],
+            ["X10:1 -> W1:1 -> X10:2"],
+        )
+        self.assertTrue(window._dirty)
+        self.assertFalse(
+            any("неизвестный компонент" in error for error in ProjectValidator.validate(project))
+        )
+
+    def test_component_delete_cancel_preserves_project(self) -> None:
+        window = self._make_window()
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+        original = window.project.to_dict()
+
+        with patch.object(window, "_confirm_component_deletion", return_value=False):
+            window.delete_selected_item()
+
+        self.assertEqual(window.project.to_dict(), original)
+        self.assertFalse(window._dirty)
+
     def test_document_shortcuts_are_registered(self) -> None:
         from PySide6.QtGui import QKeySequence
 
