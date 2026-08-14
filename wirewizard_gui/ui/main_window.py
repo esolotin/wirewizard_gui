@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Iterator
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QSplitter,
     QStackedWidget,
     QToolBar,
@@ -37,6 +38,7 @@ from wirewizard_gui.domain.serializer import ProjectSerializer
 from wirewizard_gui.domain.validation import IssueSeverity, ProjectValidator, ValidationIssue
 from wirewizard_gui.services.project_service import ProjectService
 from wirewizard_gui.services.wireviz_service import WireVizService
+from wirewizard_gui.services.wireviz_tasks import WireVizTask
 from wirewizard_gui.ui.dialogs.daisy_chain_wizard import DaisyChainWizard
 from wirewizard_gui.ui.editors.cable_editor import CableEditor
 from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
@@ -61,6 +63,12 @@ class MainWindow(QMainWindow):
         self._dirty = False
         self._clean_state: dict | None = None
         self._current_reference_item: tuple[object, str] | None = None
+        self._wireviz_request_id = 0
+        self._latest_preview_id = 0
+        self._wireviz_tasks: dict[int, WireVizTask] = {}
+        self._preview_warning_counts: dict[int, int] = {}
+        self._wireviz_pool = QThreadPool(self)
+        self._wireviz_pool.setMaxThreadCount(1)
 
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Состав проекта"])
@@ -111,6 +119,13 @@ class MainWindow(QMainWindow):
         self.problems_dock.setWidget(self.problems_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.problems_dock)
 
+        self.render_progress = QProgressBar()
+        self.render_progress.setRange(0, 0)
+        self.render_progress.setMaximumWidth(160)
+        self.render_progress.setFormat("WireViz…")
+        self.render_progress.hide()
+        self.statusBar().addPermanentWidget(self.render_progress)
+
         self._connect_editor_change_signals()
         self._build_toolbar()
         self._build_shortcuts()
@@ -135,10 +150,12 @@ class MainWindow(QMainWindow):
             ("Создать шлейф", self.open_daisy_chain_wizard),
             ("Обновить предпросмотр", self.refresh_preview),
         ]
+        self.toolbar_buttons: dict[str, QPushButton] = {}
         for text, callback in buttons:
             btn = QPushButton(text)
             btn.clicked.connect(callback)
             toolbar.addWidget(btn)
+            self.toolbar_buttons[text] = btn
 
     def _build_shortcuts(self) -> None:
         shortcuts = [
@@ -634,12 +651,11 @@ class MainWindow(QMainWindow):
         output_dir = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов WireViz")
         if not output_dir:
             return
-        ok, message, generated = WireVizService.run_full(self.project, output_dir, safe_name)
-        if ok:
-            self.statusBar().showMessage(message, 6000)
-            QMessageBox.information(self, "Построение в WireViz", message)
-        else:
-            QMessageBox.critical(self, "Построение в WireViz", message)
+        request_id = self._next_wireviz_request_id()
+        task = WireVizTask("full", request_id, self.project, output_dir, safe_name)
+        self._submit_wireviz_task(task)
+        self.toolbar_buttons["Построить в WireViz"].setEnabled(False)
+        self.statusBar().showMessage("WireViz строит выходные файлы…")
 
     def add_connector(self) -> None:
         self._save_current_editor()
@@ -818,6 +834,8 @@ class MainWindow(QMainWindow):
     def refresh_preview(self) -> None:
         self._save_current_editor()
         self._refresh_tree()
+        request_id = self._next_wireviz_request_id()
+        self._latest_preview_id = request_id
 
         issues = self._validate_project()
         errors = [issue for issue in issues if issue.severity == IssueSeverity.ERROR]
@@ -840,19 +858,50 @@ class MainWindow(QMainWindow):
             )
             return
 
-        ok, message, svg_text = WireVizService.render_svg(self.project)
+        self._preview_warning_counts[request_id] = len(warnings)
+        task = WireVizTask("preview", request_id, self.project)
+        self._submit_wireviz_task(task)
+        self.svg_preview.show_message("WireViz строит предпросмотр…")
+        self.statusBar().showMessage("Построение предпросмотра…")
+
+    def _next_wireviz_request_id(self) -> int:
+        self._wireviz_request_id += 1
+        return self._wireviz_request_id
+
+    def _submit_wireviz_task(self, task: WireVizTask) -> None:
+        self._wireviz_tasks[task.request_id] = task
+        task.signals.finished.connect(self._on_wireviz_task_finished)
+        self.render_progress.show()
+        self._wireviz_pool.start(task)
+
+    def _on_wireviz_task_finished(
+        self, kind: str, request_id: int, ok: bool, message: str, payload: object
+    ) -> None:
+        self._wireviz_tasks.pop(request_id, None)
+        if not self._wireviz_tasks:
+            self.render_progress.hide()
+
+        if kind == "full":
+            self.toolbar_buttons["Построить в WireViz"].setEnabled(True)
+            if ok:
+                self.statusBar().showMessage(message, 6000)
+                QMessageBox.information(self, "Построение в WireViz", message)
+            else:
+                QMessageBox.critical(self, "Построение в WireViz", message)
+            return
+
+        warning_count = self._preview_warning_counts.pop(request_id, 0)
+        if kind != "preview" or request_id != self._latest_preview_id:
+            return
+        svg_text = payload if isinstance(payload, str) else None
         if ok and svg_text:
             self.svg_preview.show_svg(svg_text)
             status = "Предпросмотр построен"
-            if warnings:
-                status += f"; предупреждений: {len(warnings)}"
+            if warning_count:
+                status += f"; предупреждений: {warning_count}"
             self.statusBar().showMessage(status, 5000)
         else:
             preview_message = message
-            if warnings:
-                preview_message += "\n\nПредупреждения проверки:\n" + "\n".join(
-                    issue.message for issue in warnings
-                )
             self.svg_preview.show_message(preview_message)
             self.statusBar().showMessage(message, 5000)
 
@@ -892,6 +941,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._confirm_unsaved_changes("закрыть приложение"):
+            self._wireviz_pool.clear()
+            self._wireviz_pool.waitForDone(5000)
             event.accept()
         else:
             event.ignore()

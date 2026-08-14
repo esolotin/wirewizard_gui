@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 import os
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -37,7 +39,16 @@ class MainWindowDocumentStateTests(unittest.TestCase):
 
         window = MainWindow()
         self.addCleanup(self._close_without_prompt, window)
+        self._wait_for_wireviz(window)
         return window
+
+    def _wait_for_wireviz(self, window, timeout: float = 3.0) -> None:
+        deadline = time.monotonic() + timeout
+        while window._wireviz_tasks and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.005)
+        self.app.processEvents()
+        self.assertFalse(window._wireviz_tasks, "Фоновая задача WireViz не завершилась")
 
     def _close_without_prompt(self, window) -> None:
         with patch.object(window, "_confirm_unsaved_changes", return_value=True):
@@ -738,6 +749,7 @@ class MainWindowDocumentStateTests(unittest.TestCase):
             return_value=(False, "Предпросмотр недоступен", None),
         ) as render:
             window._install_project(valid_with_warning, None, dirty=False)
+            self._wait_for_wireviz(window)
         render.assert_called_once()
         with (
             patch(
@@ -751,8 +763,70 @@ class MainWindowDocumentStateTests(unittest.TestCase):
             patch("wirewizard_gui.ui.main_window.QMessageBox.information"),
         ):
             window.run_wireviz()
+            self._wait_for_wireviz(window)
 
         run.assert_called_once()
+
+    def test_preview_runs_in_background_and_reports_progress(self) -> None:
+        window = self._make_window()
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_render(project):
+            started.set()
+            release.wait(2.0)
+            return False, "Предпросмотр недоступен", None
+
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            side_effect=slow_render,
+        ):
+            window.refresh_preview()
+            self.assertTrue(started.wait(1.0))
+            self.assertTrue(window._wireviz_tasks)
+            self.assertFalse(window.render_progress.isHidden())
+            release.set()
+            self._wait_for_wireviz(window)
+
+        self.assertTrue(window.render_progress.isHidden())
+
+    def test_preview_queue_is_sequential_and_only_latest_result_is_shown(self) -> None:
+        window = self._make_window()
+        self._select_project(window)
+        state_lock = threading.Lock()
+        active = 0
+        max_active = 0
+        rendered_titles: list[str] = []
+
+        def tracked_render(project):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+                rendered_titles.append(project.title)
+            time.sleep(0.03)
+            with state_lock:
+                active -= 1
+            svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg">'
+                f"<text>{project.title}</text></svg>"
+            )
+            return True, "Готово", svg
+
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            side_effect=tracked_render,
+        ):
+            window.project_editor.title_edit.setText("Первый запрос")
+            window.refresh_preview()
+            window.project.title = "Последний запрос"
+            window.refresh_preview()
+            self._wait_for_wireviz(window)
+
+        self.assertEqual(max_active, 1)
+        self.assertEqual(rendered_titles, ["Первый запрос", "Последний запрос"])
+        self.assertIn("Последний запрос", window.svg_preview._svg_text)
+        self.assertNotIn("Первый запрос", window.svg_preview._svg_text)
 
     def test_document_shortcuts_are_registered(self) -> None:
         from PySide6.QtGui import QKeySequence

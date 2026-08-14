@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -25,6 +26,14 @@ class RussianUiTests(unittest.TestCase):
 
         cls.app = QApplication.instance() or QApplication([])
 
+    def _wait_for_wireviz(self, window, timeout: float = 3.0) -> None:
+        deadline = time.monotonic() + timeout
+        while window._wireviz_tasks and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.005)
+        self.app.processEvents()
+        self.assertFalse(window._wireviz_tasks, "Фоновая задача WireViz не завершилась")
+
     def test_main_window_uses_russian_labels(self) -> None:
         from PySide6.QtWidgets import QAbstractButton
 
@@ -35,6 +44,7 @@ class RussianUiTests(unittest.TestCase):
             return_value=(False, "Предпросмотр недоступен", None),
         ):
             window = MainWindow()
+            self._wait_for_wireviz(window)
         self.addCleanup(window.close)
 
         button_texts = {button.text() for button in window.findChildren(QAbstractButton)}
@@ -150,6 +160,7 @@ class RussianUiTests(unittest.TestCase):
             return_value=(True, "Готово", svg),
         ):
             window = MainWindow()
+            self._wait_for_wireviz(window)
         self.addCleanup(window.close)
         connector = window.project_tree.topLevelItem(0).child(0).child(0)
 
