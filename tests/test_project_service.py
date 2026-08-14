@@ -20,7 +20,12 @@ class ProjectServiceTests(unittest.TestCase):
     def test_supported_schema_examples_open_and_save_as_current_version(self) -> None:
         examples = Path(__file__).resolve().parents[1] / "examples" / "projects"
 
-        for filename in ("v0-unversioned.json", "v1.json", "v2.json"):
+        for filename in (
+            "v0-unversioned.json",
+            "v1.json",
+            "v2.json",
+            "v3.json",
+        ):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
                 project = ProjectService.load_project(examples / filename)
                 self.assertEqual(project.schema_version, CURRENT_SCHEMA_VERSION)

@@ -46,6 +46,7 @@ class ProjectSerializer:
                 entry["color"] = item.color
             if item.notes:
                 entry["notes"] = item.notes
+            ProjectSerializer._add_bom_fields(entry, item)
             connectors[item.name] = entry
 
         for item in project.ferrules:
@@ -58,6 +59,7 @@ class ProjectSerializer:
                 entry["color"] = item.color
             if item.notes:
                 entry["notes"] = item.notes
+            ProjectSerializer._add_bom_fields(entry, item)
             connectors[item.name] = entry
 
         if connectors:
@@ -82,6 +84,7 @@ class ProjectSerializer:
                 entry["shield"] = True
             if item.notes:
                 entry["notes"] = item.notes
+            ProjectSerializer._add_bom_fields(entry, item)
             cables[item.name] = entry
 
         if cables:
@@ -155,6 +158,7 @@ class ProjectSerializer:
                         subtype=subtype or "0.5 mm²",
                         color=color,
                         notes=notes,
+                        **ProjectSerializer._read_bom_fields(entry),
                     )
                 )
             else:
@@ -170,6 +174,7 @@ class ProjectSerializer:
                         notes=notes,
                         color=color,
                         simple=is_simple,
+                        **ProjectSerializer._read_bom_fields(entry),
                     )
                 )
 
@@ -197,6 +202,7 @@ class ProjectSerializer:
                     shield=bool(entry.get("shield", False)),
                     bundle=str(entry.get("category", "")).lower() == "bundle",
                     notes=str(entry.get("notes", "") or ""),
+                    **ProjectSerializer._read_bom_fields(entry),
                 )
             )
 
@@ -212,6 +218,22 @@ class ProjectSerializer:
                 project.connections.append(ConnectionRowModel(route=route))
 
         return project
+
+    @staticmethod
+    def _add_bom_fields(entry: dict[str, Any], item: object) -> None:
+        for field_name in ("pn", "manufacturer", "mpn", "supplier", "spn"):
+            value = str(getattr(item, field_name, "") or "").strip()
+            if value:
+                entry[field_name] = value
+        if getattr(item, "ignore_in_bom", False):
+            entry["ignore_in_bom"] = True
+
+    @staticmethod
+    def _read_bom_fields(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            field_name: str(entry.get(field_name, "") or "")
+            for field_name in ("pn", "manufacturer", "mpn", "supplier", "spn")
+        } | {"ignore_in_bom": bool(entry.get("ignore_in_bom", False))}
 
     @staticmethod
     def _format_connection_part(part: Any) -> str:

@@ -6,7 +6,7 @@ from typing import Any, Callable
 from uuid import NAMESPACE_URL, uuid5
 
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 class ProjectFormatError(ValueError):
@@ -49,6 +49,11 @@ def _migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    data["schema_version"] = 3
+    return data
+
+
 def _assign_step_ids(step, component_ids: dict[str, str]) -> None:
     if step.kind == "component":
         step.component_id = component_ids.get(step.component.split(".", 1)[0])
@@ -59,6 +64,7 @@ def _assign_step_ids(step, component_ids: dict[str, str]) -> None:
 _MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
     0: _migrate_v0_to_v1,
     1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
 }
 
 

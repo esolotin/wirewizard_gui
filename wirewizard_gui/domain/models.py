@@ -20,6 +20,12 @@ class ConnectorModel:
     notes: str = ""
     color: str = ""
     simple: bool = False
+    pn: str = ""
+    manufacturer: str = ""
+    mpn: str = ""
+    supplier: str = ""
+    spn: str = ""
+    ignore_in_bom: bool = False
 
 
 @dataclass
@@ -36,6 +42,12 @@ class CableModel:
     shield: bool = False
     bundle: bool = False
     notes: str = ""
+    pn: str = ""
+    manufacturer: str = ""
+    mpn: str = ""
+    supplier: str = ""
+    spn: str = ""
+    ignore_in_bom: bool = False
 
 
 @dataclass
@@ -46,6 +58,12 @@ class FerruleModel:
     subtype: str = "0.5 mm²"
     color: str = ""
     notes: str = ""
+    pn: str = ""
+    manufacturer: str = ""
+    mpn: str = ""
+    supplier: str = ""
+    spn: str = ""
+    ignore_in_bom: bool = False
 
 
 @dataclass

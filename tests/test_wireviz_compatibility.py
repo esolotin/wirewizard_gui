@@ -22,10 +22,18 @@ class WireVizCompatibilityTests(unittest.TestCase):
         project = ProjectModel(
             title="Compatibility smoke",
             connectors=[
-                ConnectorModel(name="X1", pincount=1),
+                ConnectorModel(
+                    name="X1",
+                    pincount=1,
+                    manufacturer="Molex",
+                    mpn="22-01-2027",
+                    supplier="Distributor",
+                    spn="ABC-1",
+                    pn="CONN-1",
+                ),
                 ConnectorModel(name="X2", pincount=1),
             ],
-            cables=[CableModel(name="W1", wirecount=1)],
+            cables=[CableModel(name="W1", wirecount=1, pn="WIRE-1")],
             connections=[ConnectionRowModel(route="X1:1 -> W1:1 -> X2:1")],
         )
 
@@ -38,6 +46,9 @@ class WireVizCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(set(harness.connectors), {"X1", "X2"})
         self.assertEqual(set(harness.cables), {"W1"})
+        self.assertEqual(harness.connectors["X1"].manufacturer, "Molex")
+        self.assertEqual(harness.connectors["X1"].mpn, "22-01-2027")
+        self.assertEqual(harness.cables["W1"].pn, "WIRE-1")
 
     @unittest.skipIf(wireviz is None, "WireViz runtime dependency is not installed")
     def test_special_arrows_are_accepted_by_pinned_wireviz(self) -> None:

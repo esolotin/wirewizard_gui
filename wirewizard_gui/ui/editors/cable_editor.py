@@ -31,6 +31,12 @@ class CableEditor(QWidget):
         self.wirelabels_edit = QLineEdit()
         self.shield_check = QCheckBox("Экран")
         self.bundle_check = QCheckBox("Пучок")
+        self.pn_edit = QLineEdit()
+        self.manufacturer_edit = QLineEdit()
+        self.mpn_edit = QLineEdit()
+        self.supplier_edit = QLineEdit()
+        self.spn_edit = QLineEdit()
+        self.ignore_in_bom_check = QCheckBox("Не включать в BOM")
         self.notes_edit = QPlainTextEdit()
 
         layout = QFormLayout(self)
@@ -44,6 +50,12 @@ class CableEditor(QWidget):
         layout.addRow("Метки жил (через запятую)", self.wirelabels_edit)
         layout.addRow("", self.shield_check)
         layout.addRow("", self.bundle_check)
+        layout.addRow("Внутренний P/N", self.pn_edit)
+        layout.addRow("Производитель", self.manufacturer_edit)
+        layout.addRow("MPN производителя", self.mpn_edit)
+        layout.addRow("Поставщик", self.supplier_edit)
+        layout.addRow("Артикул поставщика (SPN)", self.spn_edit)
+        layout.addRow("", self.ignore_in_bom_check)
         layout.addRow("Примечания", self.notes_edit)
 
     def load_item(self, item: CableModel) -> None:
@@ -58,6 +70,12 @@ class CableEditor(QWidget):
         self.wirelabels_edit.setText(", ".join(item.wirelabels))
         self.shield_check.setChecked(item.shield)
         self.bundle_check.setChecked(item.bundle)
+        self.pn_edit.setText(item.pn)
+        self.manufacturer_edit.setText(item.manufacturer)
+        self.mpn_edit.setText(item.mpn)
+        self.supplier_edit.setText(item.supplier)
+        self.spn_edit.setText(item.spn)
+        self.ignore_in_bom_check.setChecked(item.ignore_in_bom)
         self.notes_edit.setPlainText(item.notes)
 
     def save_to_item(self) -> None:
@@ -73,4 +91,10 @@ class CableEditor(QWidget):
         self.current_item.wirelabels = [x.strip() for x in self.wirelabels_edit.text().split(",") if x.strip()]
         self.current_item.shield = self.shield_check.isChecked()
         self.current_item.bundle = self.bundle_check.isChecked()
+        self.current_item.pn = self.pn_edit.text().strip()
+        self.current_item.manufacturer = self.manufacturer_edit.text().strip()
+        self.current_item.mpn = self.mpn_edit.text().strip()
+        self.current_item.supplier = self.supplier_edit.text().strip()
+        self.current_item.spn = self.spn_edit.text().strip()
+        self.current_item.ignore_in_bom = self.ignore_in_bom_check.isChecked()
         self.current_item.notes = self.notes_edit.toPlainText().strip()

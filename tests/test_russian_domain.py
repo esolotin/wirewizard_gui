@@ -127,6 +127,35 @@ class RussianDomainTests(unittest.TestCase):
         self.assertEqual(exported["connections"], connections)
         self.assertEqual(ProjectValidator.validate(project), [])
 
+    def test_bom_fields_survive_wireviz_yaml_round_trip(self) -> None:
+        project = ProjectModel(
+            connectors=[
+                ConnectorModel(
+                    name="X1",
+                    pn="CONN-1",
+                    manufacturer="Molex",
+                    mpn="22-01-2027",
+                    supplier="Поставщик",
+                    spn="A-42",
+                )
+            ],
+            cables=[CableModel(name="W1", pn="WIRE-1", ignore_in_bom=True)],
+            ferrules=[
+                FerruleModel(name="F1", manufacturer="Phoenix Contact", mpn="AI 0,5-8")
+            ],
+        )
+
+        exported = ProjectSerializer.to_wireviz_dict(project)
+        restored = ProjectSerializer.from_wireviz_dict(exported)
+
+        self.assertEqual(exported["connectors"]["X1"]["pn"], "CONN-1")
+        self.assertEqual(exported["connectors"]["X1"]["mpn"], "22-01-2027")
+        self.assertTrue(exported["cables"]["W1"]["ignore_in_bom"])
+        self.assertEqual(restored.connectors[0].supplier, "Поставщик")
+        self.assertEqual(restored.connectors[0].spn, "A-42")
+        self.assertTrue(restored.cables[0].ignore_in_bom)
+        self.assertEqual(restored.ferrules[0].manufacturer, "Phoenix Contact")
+
 
     def test_validator_rejects_invalid_arrows_and_group_sizes(self) -> None:
         project = ProjectModel(

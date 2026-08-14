@@ -198,6 +198,21 @@ class MainWindow(QMainWindow):
             self.cable_editor.colors_edit,
             self.cable_editor.wirelabels_edit,
             self.ferrule_editor.name_edit,
+            self.connector_editor.pn_edit,
+            self.connector_editor.manufacturer_edit,
+            self.connector_editor.mpn_edit,
+            self.connector_editor.supplier_edit,
+            self.connector_editor.spn_edit,
+            self.cable_editor.pn_edit,
+            self.cable_editor.manufacturer_edit,
+            self.cable_editor.mpn_edit,
+            self.cable_editor.supplier_edit,
+            self.cable_editor.spn_edit,
+            self.ferrule_editor.pn_edit,
+            self.ferrule_editor.manufacturer_edit,
+            self.ferrule_editor.mpn_edit,
+            self.ferrule_editor.supplier_edit,
+            self.ferrule_editor.spn_edit,
         ]
         for editor in line_edits:
             editor.textChanged.connect(self._on_editor_content_changed)
@@ -231,6 +246,15 @@ class MainWindow(QMainWindow):
         self.connector_editor.simple_check.toggled.connect(self._on_editor_content_changed)
         self.cable_editor.shield_check.toggled.connect(self._on_editor_content_changed)
         self.cable_editor.bundle_check.toggled.connect(self._on_editor_content_changed)
+        self.connector_editor.ignore_in_bom_check.toggled.connect(
+            self._on_editor_content_changed
+        )
+        self.cable_editor.ignore_in_bom_check.toggled.connect(
+            self._on_editor_content_changed
+        )
+        self.ferrule_editor.ignore_in_bom_check.toggled.connect(
+            self._on_editor_content_changed
+        )
         self.connections_editor.content_changed.connect(self._on_editor_content_changed)
         self.connector_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)
         self.cable_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)

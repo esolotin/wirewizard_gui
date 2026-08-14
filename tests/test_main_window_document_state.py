@@ -173,6 +173,35 @@ class MainWindowDocumentStateTests(unittest.TestCase):
                 self.assertTrue(window._dirty)
                 self.assertTrue(window.windowTitle().endswith(" *"))
 
+    def test_bom_editor_fields_update_models_and_support_undo(self) -> None:
+        window = self._make_window()
+
+        cases = [
+            (0, window.connector_editor.mpn_edit, "connectors", "mpn", "MPN-1"),
+            (1, window.cable_editor.pn_edit, "cables", "pn", "WIRE-1"),
+            (2, window.ferrule_editor.spn_edit, "ferrules", "spn", "SPN-1"),
+        ]
+        for tree_group, editor, collection, attribute, value in cases:
+            with self.subTest(attribute=attribute):
+                window._install_project(window._create_demo_project(), None, dirty=False)
+                node = window.project_tree.topLevelItem(0).child(tree_group).child(0)
+                window.project_tree.setCurrentItem(node)
+
+                editor.setText(value)
+
+                item = getattr(window.project, collection)[0]
+                self.assertEqual(getattr(item, attribute), value)
+                window.undo_stack.undo()
+                self._wait_for_wireviz(window)
+                item = getattr(window.project, collection)[0]
+                self.assertEqual(getattr(item, attribute), "")
+
+        window._install_project(window._create_demo_project(), None, dirty=False)
+        node = window.project_tree.topLevelItem(0).child(1).child(0)
+        window.project_tree.setCurrentItem(node)
+        window.cable_editor.ignore_in_bom_check.setChecked(True)
+        self.assertTrue(window.project.cables[0].ignore_in_bom)
+
     def test_connection_cell_and_row_changes_set_dirty(self) -> None:
         window = self._make_window()
         connections_node = window.project_tree.topLevelItem(0).child(3).child(0)

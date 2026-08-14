@@ -1,0 +1,21 @@
+{
+  "schema_version": 3,
+  "title": "Пример проекта формата v3",
+  "description": "Инженерные поля для спецификации BOM.",
+  "connectors": [
+    {
+      "name": "X1",
+      "id": "c9a6bed70edb4332b77ee2b5ad33ee2e",
+      "pincount": 2,
+      "pn": "CONN-001",
+      "manufacturer": "Molex",
+      "mpn": "22-01-2027",
+      "supplier": "Example Distributor",
+      "spn": "100500",
+      "ignore_in_bom": false
+    }
+  ],
+  "cables": [],
+  "ferrules": [],
+  "connections": []
+}
