@@ -14,6 +14,18 @@ if (PROJECT_ROOT / "__init__.py").exists():
         "__init__.py so it cannot shadow the canonical wirewizard_gui package."
     )
 
+legacy_source_roots = [
+    PROJECT_ROOT / name
+    for name in ("domain", "services", "ui")
+    if (PROJECT_ROOT / name).exists()
+]
+if legacy_source_roots:
+    conflicts = ", ".join(path.name for path in legacy_source_roots)
+    raise SystemExit(
+        f"Legacy source mirrors must be removed; keep implementation only in "
+        f"wirewizard_gui: {conflicts}"
+    )
+
 wireviz_datas, wireviz_binaries, wireviz_hiddenimports = collect_all("wireviz")
 
 datas = list(wireviz_datas)
