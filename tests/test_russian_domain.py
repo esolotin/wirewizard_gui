@@ -11,7 +11,7 @@ from wirewizard_gui.domain.models import (
 )
 from wirewizard_gui.domain.options import CONNECTOR_SUBTYPES
 from wirewizard_gui.domain.serializer import ProjectSerializer
-from wirewizard_gui.domain.validation import ProjectValidator
+from wirewizard_gui.domain.validation import IssueSeverity, ProjectValidator
 
 
 class RussianDomainTests(unittest.TestCase):
@@ -56,6 +56,26 @@ class RussianDomainTests(unittest.TestCase):
         self.assertTrue(errors)
         self.assertTrue(all("Connection row" not in error for error in errors))
         self.assertTrue(any("Строка соединения" in error for error in errors))
+
+    def test_structured_validation_separates_errors_and_warnings(self) -> None:
+        project = ProjectModel(
+            connectors=[
+                ConnectorModel(name="X1", pincount=2),
+                ConnectorModel(name="X2", pincount=2),
+                ConnectorModel(name="X3", pincount=2),
+            ],
+            cables=[CableModel(name="W1", wirecount=1)],
+            connections=[ConnectionRowModel(route="X1:3 -> W1:1 -> X2:1")],
+        )
+
+        issues = ProjectValidator.validate_issues(project)
+        errors = [issue for issue in issues if issue.severity == IssueSeverity.ERROR]
+        warnings = [issue for issue in issues if issue.severity == IssueSeverity.WARNING]
+
+        self.assertTrue(errors)
+        self.assertEqual(errors[0].component_name, "X1")
+        self.assertEqual(errors[0].row_index, 0)
+        self.assertEqual([issue.component_name for issue in warnings], ["X3"])
 
     def test_route_split_preserves_wireviz_arrows_and_groups(self) -> None:
         cases = {

@@ -8,6 +8,7 @@ from typing import Iterator
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
+    QDockWidget,
     QFileDialog,
     QLabel,
     QMainWindow,
@@ -33,7 +34,7 @@ from wirewizard_gui.domain.models import (
 )
 from wirewizard_gui.domain.references import ProjectReferences
 from wirewizard_gui.domain.serializer import ProjectSerializer
-from wirewizard_gui.domain.validation import ProjectValidator
+from wirewizard_gui.domain.validation import IssueSeverity, ProjectValidator, ValidationIssue
 from wirewizard_gui.services.project_service import ProjectService
 from wirewizard_gui.services.wireviz_service import WireVizService
 from wirewizard_gui.ui.dialogs.daisy_chain_wizard import DaisyChainWizard
@@ -43,6 +44,7 @@ from wirewizard_gui.ui.editors.connector_editor import ConnectorEditor
 from wirewizard_gui.ui.editors.ferrule_editor import FerruleEditor
 from wirewizard_gui.ui.editors.project_editor import ProjectEditor
 from wirewizard_gui.ui.panels.svg_preview import SvgPreviewPanel
+from wirewizard_gui.ui.panels.problems import ProblemsPanel
 from wirewizard_gui.ui.panels.yaml_preview import YamlPreviewPanel
 
 
@@ -101,6 +103,13 @@ class MainWindow(QMainWindow):
         splitter_main.addWidget(splitter_right)
         splitter_main.setSizes([280, 420, 700])
         layout.addWidget(splitter_main)
+
+        self.problems_panel = ProblemsPanel()
+        self.problems_panel.issue_activated.connect(self._navigate_to_issue)
+        self.problems_dock = QDockWidget("Проблемы", self)
+        self.problems_dock.setObjectName("problems_dock")
+        self.problems_dock.setWidget(self.problems_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.problems_dock)
 
         self._connect_editor_change_signals()
         self._build_toolbar()
@@ -605,6 +614,17 @@ class MainWindow(QMainWindow):
 
     def run_wireviz(self) -> None:
         self._save_current_editor()
+        issues = self._validate_project()
+        errors = [issue for issue in issues if issue.severity == IssueSeverity.ERROR]
+        if errors:
+            QMessageBox.critical(
+                self,
+                "Построение в WireViz",
+                "Исправьте ошибки перед запуском WireViz:\n\n"
+                + "\n".join(f"• {issue.message}" for issue in errors),
+            )
+            self.problems_dock.show()
+            return
         suggested = Path(self.current_path).stem if self.current_path else (self.project.title.strip() or "harness")
         safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in suggested).strip("_") or "harness"
         output_dir = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов WireViz")
@@ -795,26 +815,76 @@ class MainWindow(QMainWindow):
         self._save_current_editor()
         self._refresh_tree()
 
-        errors = ProjectValidator.validate(self.project)
+        issues = self._validate_project()
+        errors = [issue for issue in issues if issue.severity == IssueSeverity.ERROR]
+        warnings = [issue for issue in issues if issue.severity == IssueSeverity.WARNING]
         yaml_text = ProjectSerializer.to_wireviz_yaml(self.project)
         if errors:
+            yaml_text += "\n\n# Ошибки проверки:\n"
+            yaml_text += "\n".join(f"# - {issue.message}" for issue in errors)
+        if warnings:
             yaml_text += "\n\n# Предупреждения проверки:\n"
-            yaml_text += "\n".join(f"# - {err}" for err in errors)
+            yaml_text += "\n".join(f"# - {issue.message}" for issue in warnings)
         self.yaml_preview.setPlainText(yaml_text)
+
+        if errors:
+            self.svg_preview.show_message(
+                "Исправьте ошибки в панели проблем перед построением предпросмотра."
+            )
+            self.statusBar().showMessage(
+                f"Ошибок: {len(errors)}; предупреждений: {len(warnings)}", 5000
+            )
+            return
 
         ok, message, svg_text = WireVizService.render_svg(self.project)
         if ok and svg_text:
             self.svg_preview.show_svg(svg_text)
             status = "Предпросмотр построен"
-            if errors:
-                status += f"; предупреждений: {len(errors)}"
+            if warnings:
+                status += f"; предупреждений: {len(warnings)}"
             self.statusBar().showMessage(status, 5000)
         else:
             preview_message = message
-            if errors:
-                preview_message += "\n\nПредупреждения проверки:\n" + "\n".join(errors)
+            if warnings:
+                preview_message += "\n\nПредупреждения проверки:\n" + "\n".join(
+                    issue.message for issue in warnings
+                )
             self.svg_preview.show_message(preview_message)
             self.statusBar().showMessage(message, 5000)
+
+    def _validate_project(self) -> list[ValidationIssue]:
+        issues = ProjectValidator.validate_issues(self.project)
+        self.problems_panel.set_issues(issues)
+        return issues
+
+    def _navigate_to_issue(self, issue: ValidationIssue) -> None:
+        root = self.project_tree.topLevelItem(0)
+        if root is None:
+            return
+
+        if issue.row_index is not None:
+            connections_group = root.child(3)
+            if connections_group is not None and connections_group.childCount():
+                self.project_tree.setCurrentItem(connections_group.child(0))
+                row = min(issue.row_index, self.connections_editor.table.rowCount() - 1)
+                if row >= 0:
+                    self.connections_editor.table.setCurrentCell(row, 0)
+                    self.connections_editor.table.scrollTo(
+                        self.connections_editor.table.model().index(row, 0)
+                    )
+                return
+
+        if issue.component_name:
+            for group_index in range(3):
+                group = root.child(group_index)
+                if group is None:
+                    continue
+                for child_index in range(group.childCount()):
+                    child = group.child(child_index)
+                    payload = child.data(0, Qt.UserRole)
+                    if payload and payload[1].name == issue.component_name:
+                        self.project_tree.setCurrentItem(child)
+                        return
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._confirm_unsaved_changes("закрыть приложение"):

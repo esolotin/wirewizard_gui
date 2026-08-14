@@ -646,6 +646,114 @@ class MainWindowDocumentStateTests(unittest.TestCase):
         self.assertEqual(window.project.to_dict(), original)
         self.assertFalse(window._dirty)
 
+    def test_problems_panel_separates_issues_and_navigates_to_source(self) -> None:
+        from PySide6.QtCore import Qt
+
+        from wirewizard_gui.domain.models import (
+            CableModel,
+            ConnectionRowModel,
+            ConnectorModel,
+            ProjectModel,
+        )
+        from wirewizard_gui.domain.validation import IssueSeverity
+
+        window = self._make_window()
+        project = ProjectModel(
+            connectors=[
+                ConnectorModel(name="X1", pincount=1),
+                ConnectorModel(name="X2", pincount=1),
+                ConnectorModel(name="X3", pincount=1),
+            ],
+            cables=[CableModel(name="W1", wirecount=1)],
+            connections=[ConnectionRowModel(route="X1:2 -> W1:1 -> X2:1")],
+        )
+        window._install_project(project, None, dirty=False)
+
+        panel = window.problems_panel
+        issues = [
+            panel.topLevelItem(index).data(0, Qt.ItemDataRole.UserRole)
+            for index in range(panel.topLevelItemCount())
+        ]
+        error = next(issue for issue in issues if issue.severity == IssueSeverity.ERROR)
+        warning = next(issue for issue in issues if issue.severity == IssueSeverity.WARNING)
+        self.assertEqual(error.row_index, 0)
+        self.assertEqual(error.component_name, "X1")
+        self.assertEqual(warning.component_name, "X3")
+
+        error_item = next(
+            panel.topLevelItem(index)
+            for index in range(panel.topLevelItemCount())
+            if panel.topLevelItem(index).data(0, Qt.ItemDataRole.UserRole) == error
+        )
+        panel.itemDoubleClicked.emit(error_item, 0)
+        self.assertEqual(window.editor_stack.currentWidget(), window.connections_editor)
+        self.assertEqual(window.connections_editor.table.currentRow(), 0)
+
+        window._navigate_to_issue(warning)
+        payload = window.project_tree.currentItem().data(0, Qt.ItemDataRole.UserRole)
+        self.assertEqual(payload[1].name, "X3")
+
+    def test_wireviz_is_blocked_by_errors_but_not_warnings(self) -> None:
+        from wirewizard_gui.domain.models import (
+            CableModel,
+            ConnectionRowModel,
+            ConnectorModel,
+            ProjectModel,
+        )
+
+        window = self._make_window()
+        invalid = ProjectModel(
+            connectors=[ConnectorModel(name="X1"), ConnectorModel(name="X2")],
+            cables=[CableModel(name="W1", wirecount=1)],
+            connections=[ConnectionRowModel(route="X1:1 -> W1:2 -> X2:1")],
+        )
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg"
+        ) as render:
+            window._install_project(invalid, None, dirty=False)
+        render.assert_not_called()
+
+        with (
+            patch("wirewizard_gui.ui.main_window.QFileDialog.getExistingDirectory") as choose,
+            patch("wirewizard_gui.ui.main_window.WireVizService.run_full") as run,
+            patch("wirewizard_gui.ui.main_window.QMessageBox.critical") as critical,
+        ):
+            window.run_wireviz()
+
+        choose.assert_not_called()
+        run.assert_not_called()
+        critical.assert_called_once()
+
+        valid_with_warning = ProjectModel(
+            connectors=[
+                ConnectorModel(name="X1"),
+                ConnectorModel(name="X2"),
+                ConnectorModel(name="X3"),
+            ],
+            cables=[CableModel(name="W1", wirecount=1)],
+            connections=[ConnectionRowModel(route="X1:1 -> W1:1 -> X2:1")],
+        )
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            return_value=(False, "Предпросмотр недоступен", None),
+        ) as render:
+            window._install_project(valid_with_warning, None, dirty=False)
+        render.assert_called_once()
+        with (
+            patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getExistingDirectory",
+                return_value="output",
+            ),
+            patch(
+                "wirewizard_gui.ui.main_window.WireVizService.run_full",
+                return_value=(True, "Готово", []),
+            ) as run,
+            patch("wirewizard_gui.ui.main_window.QMessageBox.information"),
+        ):
+            window.run_wireviz()
+
+        run.assert_called_once()
+
     def test_document_shortcuts_are_registered(self) -> None:
         from PySide6.QtGui import QKeySequence
 

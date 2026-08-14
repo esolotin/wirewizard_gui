@@ -1,10 +1,56 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
+
 from wirewizard_gui.domain.models import ProjectModel
+from wirewizard_gui.domain.references import ProjectReferences
 from wirewizard_gui.domain.serializer import ProjectSerializer
 
 
+class IssueSeverity(str, Enum):
+    ERROR = "error"
+    WARNING = "warning"
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    severity: IssueSeverity
+    message: str
+    component_name: str | None = None
+    row_index: int | None = None
+
+
 class ProjectValidator:
+    @staticmethod
+    def validate_issues(project: ProjectModel) -> list[ValidationIssue]:
+        component_names = [
+            item.name
+            for item in [*project.connectors, *project.cables, *project.ferrules]
+        ]
+        issues = [
+            ValidationIssue(
+                severity=IssueSeverity.ERROR,
+                message=message,
+                component_name=ProjectValidator._message_component(
+                    message, component_names
+                ),
+                row_index=ProjectValidator._message_row_index(message),
+            )
+            for message in ProjectValidator.validate(project)
+        ]
+
+        for name in component_names:
+            if not ProjectReferences.dependent_rows(project, name):
+                issues.append(
+                    ValidationIssue(
+                        severity=IssueSeverity.WARNING,
+                        message=f"Компонент {name} не используется ни в одном соединении",
+                        component_name=name,
+                    )
+                )
+        return issues
+
     @staticmethod
     def validate(project: ProjectModel) -> list[str]:
         errors: list[str] = []
@@ -145,6 +191,20 @@ class ProjectValidator:
                 errors.append(f"Строка соединения {idx}: параллельные группы контактов и жил должны иметь одинаковую длину")
 
         return errors
+
+    @staticmethod
+    def _message_row_index(message: str) -> int | None:
+        import re
+
+        match = re.search(r"Строка соединения (\d+)", message)
+        return int(match.group(1)) - 1 if match else None
+
+    @staticmethod
+    def _message_component(message: str, component_names: list[str]) -> str | None:
+        for name in sorted(component_names, key=len, reverse=True):
+            if name and name in message:
+                return name
+        return None
 
     @staticmethod
     def _resolve_component_name(name: str, component_names: set[str], simple_template_names: set[str]) -> str | None:
