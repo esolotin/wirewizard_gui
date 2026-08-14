@@ -841,11 +841,103 @@ class MainWindowDocumentStateTests(unittest.TestCase):
         self.assertIn("Последний запрос", window.svg_preview._svg_text)
         self.assertNotIn("Первый запрос", window.svg_preview._svg_text)
 
+    def test_undo_redo_field_edit_restores_clean_checkpoint(self) -> None:
+        window = self._make_window()
+        original_title = window.project.title
+        self._select_project(window)
+
+        window.project_editor.title_edit.setText("Новое название")
+
+        self.assertTrue(window.undo_stack.canUndo())
+        self.assertTrue(window._dirty)
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(window.project.title, original_title)
+        self.assertFalse(window._dirty)
+
+        window.undo_stack.redo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(window.project.title, "Новое название")
+        self.assertTrue(window._dirty)
+
+    def test_undo_redo_connection_edit_and_addition(self) -> None:
+        window = self._make_window()
+        connections_node = window.project_tree.topLevelItem(0).child(3).child(0)
+        window.project_tree.setCurrentItem(connections_node)
+        original_route = window.project.connections[0].route
+        cell = window.connections_editor.table.cellWidget(0, 0)
+
+        cell.component_combo.setCurrentIndex(cell.component_combo.findData("X2"))
+        changed_route = window.project.connections[0].route
+        self.assertNotEqual(changed_route, original_route)
+
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(window.project.connections[0].route, original_route)
+        window.undo_stack.redo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(window.project.connections[0].route, changed_route)
+
+        count = len(window.project.connectors)
+        window.add_connector()
+        self.assertEqual(len(window.project.connectors), count + 1)
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(len(window.project.connectors), count)
+        window.undo_stack.redo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(len(window.project.connectors), count + 1)
+
+    def test_component_rename_and_delete_are_single_reversible_commands(self) -> None:
+        window = self._make_window()
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+        original_routes = [row.route for row in window.project.connections]
+
+        window.connector_editor.name_edit.setText("X9")
+        window.connector_editor.name_edit.editingFinished.emit()
+
+        self.assertEqual(window.undo_stack.count(), 1)
+        self.assertEqual(window.project.connectors[0].name, "X9")
+        self.assertTrue(window.project.connections[0].route.startswith("X9:"))
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(window.project.connectors[0].name, "X1")
+        self.assertEqual([row.route for row in window.project.connections], original_routes)
+        window.undo_stack.redo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(window.project.connectors[0].name, "X9")
+
+        connector_node = window.project_tree.topLevelItem(0).child(0).child(0)
+        window.project_tree.setCurrentItem(connector_node)
+        with patch.object(window, "_confirm_component_deletion", return_value=True):
+            window.delete_selected_item()
+        self.assertNotIn("X9", [item.name for item in window.project.connectors])
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertIn("X9", [item.name for item in window.project.connectors])
+        self.assertTrue(window.project.connections[0].route.startswith("X9:"))
+
+    def test_installing_another_document_clears_undo_history(self) -> None:
+        from wirewizard_gui.domain.models import ProjectModel
+
+        window = self._make_window()
+        window.add_connector()
+        self.assertTrue(window.undo_stack.canUndo())
+
+        window._install_project(ProjectModel(title="Другой проект"), None, dirty=False)
+        self._wait_for_wireviz(window)
+
+        self.assertFalse(window.undo_stack.canUndo())
+        self.assertFalse(window.undo_stack.canRedo())
+
     def test_document_shortcuts_are_registered(self) -> None:
         from PySide6.QtGui import QKeySequence
 
         window = self._make_window()
         expected = {
+            "undo_action": "Ctrl+Z",
+            "redo_action": "Ctrl+Y",
             "new_project_action": "Ctrl+N",
             "open_project_action": "Ctrl+O",
             "save_project_action": "Ctrl+S",

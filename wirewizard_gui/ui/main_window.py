@@ -7,7 +7,7 @@ from typing import Iterator
 from uuid import uuid4
 
 from PySide6.QtCore import QThreadPool, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -41,6 +41,7 @@ from wirewizard_gui.services.project_service import ProjectService
 from wirewizard_gui.services.wireviz_service import WireVizService
 from wirewizard_gui.services.wireviz_tasks import WireVizTask
 from wirewizard_gui.ui.dialogs.daisy_chain_wizard import DaisyChainWizard
+from wirewizard_gui.ui.document_history import ProjectSnapshotCommand
 from wirewizard_gui.ui.editors.cable_editor import CableEditor
 from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
 from wirewizard_gui.ui.editors.connector_editor import ConnectorEditor
@@ -64,6 +65,9 @@ class MainWindow(QMainWindow):
         self._dirty = False
         self._clean_state: dict | None = None
         self._current_reference_item: tuple[object, str] | None = None
+        self._pending_rename_before: dict | None = None
+        self.undo_stack = QUndoStack(self)
+        self.undo_stack.setUndoLimit(100)
         self._wireviz_request_id = 0
         self._latest_preview_id = 0
         self._wireviz_tasks: dict[int, WireVizTask] = {}
@@ -141,6 +145,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         buttons: list[tuple[str, callable]] = [
+            ("Отменить", self.undo_stack.undo),
+            ("Повторить", self.undo_stack.redo),
             ("Новый проект", self.new_project),
             ("Открыть проект", self.open_project),
             ("Импорт YAML", self.import_yaml),
@@ -157,9 +163,19 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(callback)
             toolbar.addWidget(btn)
             self.toolbar_buttons[text] = btn
+        self.toolbar_buttons["Отменить"].setEnabled(False)
+        self.toolbar_buttons["Повторить"].setEnabled(False)
+        self.undo_stack.canUndoChanged.connect(
+            self.toolbar_buttons["Отменить"].setEnabled
+        )
+        self.undo_stack.canRedoChanged.connect(
+            self.toolbar_buttons["Повторить"].setEnabled
+        )
 
     def _build_shortcuts(self) -> None:
         shortcuts = [
+            ("undo_action", "Отменить", "Ctrl+Z", self.undo_stack.undo),
+            ("redo_action", "Повторить", "Ctrl+Y", self.undo_stack.redo),
             ("new_project_action", "Новый проект", "Ctrl+N", self.new_project),
             ("open_project_action", "Открыть проект", "Ctrl+O", self.open_project),
             ("save_project_action", "Сохранить проект", "Ctrl+S", self.save_project),
@@ -295,8 +311,19 @@ class MainWindow(QMainWindow):
     def _on_editor_content_changed(self, *_args) -> None:
         if self._change_tracking_depth:
             return
+        before = self.project.to_dict()
         self._editor_pending = True
         self._save_current_editor(finalize_name=False)
+        component_name_edits = {
+            self.connector_editor.name_edit,
+            self.cable_editor.name_edit,
+            self.ferrule_editor.name_edit,
+        }
+        if self.sender() in component_name_edits:
+            if self._pending_rename_before is None:
+                self._pending_rename_before = before
+            return
+        self._record_project_change(before, "Изменение поля")
 
     def _save_current_editor(self, *, finalize_name: bool = True) -> None:
         if self._editor_pending:
@@ -324,7 +351,9 @@ class MainWindow(QMainWindow):
         item, previous_name = self._current_reference_item
         current_name = str(getattr(item, "name", "")).strip()
         if current_name == previous_name:
+            self._pending_rename_before = None
             return
+        history_before = self._pending_rename_before or self.project.to_dict()
 
         all_items = [*self.project.connectors, *self.project.cables, *self.project.ferrules]
         if any(other is not item and other.name == current_name for other in all_items):
@@ -339,6 +368,7 @@ class MainWindow(QMainWindow):
                 f"Обозначение {current_name!r} уже используется. Переименование отменено.",
             )
             self._update_dirty_state()
+            self._pending_rename_before = None
             return
 
         changed_rows = ProjectReferences.rename_component(
@@ -354,6 +384,8 @@ class MainWindow(QMainWindow):
             self.project.connectors, self.project.cables, self.project.ferrules
         )
         self._update_dirty_state()
+        self._pending_rename_before = None
+        self._record_project_change(history_before, "Переименование компонента")
         if changed_rows:
             rows = ", ".join(str(index + 1) for index in changed_rows)
             self.statusBar().showMessage(f"Ссылки обновлены в строках: {rows}", 5000)
@@ -385,6 +417,28 @@ class MainWindow(QMainWindow):
         self._clean_state = self.project.to_dict()
         self._update_dirty_state()
 
+    def _record_project_change(self, before: dict, text: str) -> None:
+        if self._change_tracking_depth:
+            return
+        after = self.project.to_dict()
+        if before != after:
+            self.undo_stack.push(
+                ProjectSnapshotCommand(
+                    text, before, after, self._restore_project_snapshot
+                )
+            )
+
+    def _restore_project_snapshot(self, snapshot: dict) -> None:
+        with self._suspend_change_tracking():
+            self._editor_pending = False
+            self._pending_rename_before = None
+            self._current_reference_item = None
+            self.editor_stack.setCurrentIndex(0)
+            self.project = ProjectModel.from_dict(deepcopy(snapshot))
+            self._refresh_tree()
+            self.refresh_preview()
+        self._update_dirty_state()
+
     def _install_project(self, project: ProjectModel, path: str | None, *, dirty: bool) -> None:
         previous_project = self.project
         previous_path = self.current_path
@@ -402,6 +456,7 @@ class MainWindow(QMainWindow):
                 self._refresh_tree()
                 self.refresh_preview()
             self._clean_state = None if dirty else self.project.to_dict()
+            self.undo_stack.clear()
             self._update_dirty_state()
         except BaseException:
             with self._suspend_change_tracking():
@@ -660,33 +715,41 @@ class MainWindow(QMainWindow):
 
     def add_connector(self) -> None:
         self._save_current_editor()
+        before = self.project.to_dict()
         new_name = self._next_name("X", [item.name for item in self.project.connectors])
         self.project.connectors.append(ConnectorModel(name=new_name))
         self._update_dirty_state()
+        self._record_project_change(before, "Добавление разъёма")
         self._refresh_tree()
         self.refresh_preview()
 
     def add_cable(self) -> None:
         self._save_current_editor()
+        before = self.project.to_dict()
         new_name = self._next_name("W", [item.name for item in self.project.cables])
         self.project.cables.append(CableModel(name=new_name))
         self._update_dirty_state()
+        self._record_project_change(before, "Добавление кабеля")
         self._refresh_tree()
         self.refresh_preview()
 
     def add_ferrule(self) -> None:
         self._save_current_editor()
+        before = self.project.to_dict()
         new_name = self._next_name("F", [item.name for item in self.project.ferrules])
         self.project.ferrules.append(FerruleModel(name=new_name))
         self._update_dirty_state()
+        self._record_project_change(before, "Добавление наконечника")
         self._refresh_tree()
         self.refresh_preview()
 
     def add_connection_row(self) -> None:
         self._save_current_editor()
+        before = self.project.to_dict()
         seed = self._default_route_template()
         self.project.connections.append(ConnectionRowModel(route=seed))
         self._update_dirty_state()
+        self._record_project_change(before, "Добавление соединения")
         self._refresh_tree()
         self.refresh_preview()
 
@@ -722,6 +785,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Шлейфовое соединение", "Выбранный шаблон кабеля не найден.")
             return
 
+        before = self.project.to_dict()
+
         existing_cable_names = [item.name for item in self.project.cables]
         created_cables = []
         for segment_index in range(segment_count):
@@ -746,6 +811,7 @@ class MainWindow(QMainWindow):
         self.project.cables.extend(created_cables)
         self.project.connections.extend(generated)
         self._update_dirty_state()
+        self._record_project_change(before, "Создание шлейфа")
         self._refresh_tree()
         self.refresh_preview()
         self.statusBar().showMessage(
@@ -758,6 +824,7 @@ class MainWindow(QMainWindow):
         payload = self._selected_payload()
         if not payload:
             return
+        before = self.project.to_dict()
         kind, obj = payload
         if kind == "connector":
             clone = deepcopy(obj)
@@ -779,6 +846,7 @@ class MainWindow(QMainWindow):
         else:
             return
         self._update_dirty_state()
+        self._record_project_change(before, "Дублирование")
         self._refresh_tree()
         self.refresh_preview()
 
@@ -792,6 +860,8 @@ class MainWindow(QMainWindow):
             dependent_rows = ProjectReferences.dependent_rows(self.project, obj.name)
             if not self._confirm_component_deletion(obj.name, dependent_rows):
                 return
+        before = self.project.to_dict()
+        if kind in {"connector", "cable", "ferrule"}:
             ProjectReferences.remove_dependent_rows(self.project, obj.name)
             self._current_reference_item = None
 
@@ -806,6 +876,7 @@ class MainWindow(QMainWindow):
         else:
             return
         self._update_dirty_state()
+        self._record_project_change(before, "Удаление")
         self._refresh_tree()
         self.refresh_preview()
 
