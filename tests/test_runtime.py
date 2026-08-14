@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 import tempfile
 import unittest
@@ -210,36 +210,46 @@ class RuntimeTests(unittest.TestCase):
         with (
             patch.object(runtime.os, "name", "posix"),
             patch.object(runtime.sys, "platform", "linux"),
+            patch.object(runtime, "Path", PurePosixPath),
         ):
             result = runtime.application_data_dir(
                 environ={"XDG_STATE_HOME": "/state"},
                 app_dir="/opt/wirewizardgui",
             )
-        self.assertEqual(result, Path("/state") / "wirewizardgui")
+        self.assertEqual(result, PurePosixPath("/state") / "wirewizardgui")
 
     def test_logging_and_exception_hook_work_without_console(self) -> None:
+        logger = logging.getLogger("wirewizard_gui")
         with tempfile.TemporaryDirectory() as tmp:
-            log_path = runtime.configure_logging(tmp)
-            reporter = Mock()
-            with patch.object(runtime, "is_frozen", return_value=True):
-                runtime.install_exception_handler(reporter)
-                try:
-                    raise ValueError("boom")
-                except ValueError:
-                    exc_type, exc_value, traceback = sys.exc_info()
-                    assert exc_type is not None
-                    assert exc_value is not None
-                    sys.excepthook(exc_type, exc_value, traceback)
+            try:
+                log_path = runtime.configure_logging(tmp)
+                reporter = Mock()
+                with patch.object(runtime, "is_frozen", return_value=True):
+                    runtime.install_exception_handler(reporter)
+                    try:
+                        raise ValueError("boom")
+                    except ValueError:
+                        exc_type, exc_value, traceback = sys.exc_info()
+                        assert exc_type is not None
+                        assert exc_value is not None
+                        sys.excepthook(exc_type, exc_value, traceback)
 
-            for handler in logging.getLogger("wirewizard_gui").handlers:
-                handler.flush()
-            log_text = log_path.read_text(encoding="utf-8")
+                for handler in logger.handlers:
+                    handler.flush()
+                log_text = log_path.read_text(encoding="utf-8")
 
-            self.assertIn("Unhandled exception", log_text)
-            self.assertIn("ValueError: boom", log_text)
-            reporter.assert_called_once()
-            self.assertIn(str(log_path), reporter.call_args.args[1])
-
+                self.assertIn("Unhandled exception", log_text)
+                self.assertIn("ValueError: boom", log_text)
+                reporter.assert_called_once()
+                self.assertIn(str(log_path), reporter.call_args.args[1])
+            finally:
+                # Windows does not allow TemporaryDirectory to remove an open
+                # RotatingFileHandler target. Close it before leaving the
+                # temporary directory instead of waiting for tearDown().
+                for handler in list(logger.handlers):
+                    if getattr(handler, runtime._HANDLER_MARKER, False):
+                        logger.removeHandler(handler)
+                        handler.close()
 
 if __name__ == "__main__":
     unittest.main()

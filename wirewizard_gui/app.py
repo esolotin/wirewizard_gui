@@ -11,6 +11,9 @@ from wirewizard_gui.runtime import (
 )
 
 
+logger = logging.getLogger("wirewizard_gui.app")
+
+
 def main(argv: list[str] | None = None) -> int:
     log_path = configure_logging()
     install_exception_handler()
@@ -33,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     install_exception_handler(show_exception)
     window = MainWindow()
     window.show()
-    logging.getLogger(__name__).info("Runtime log: %s", log_path)
+    logger.info("Runtime log: %s", log_path)
     return app.exec()
 
 

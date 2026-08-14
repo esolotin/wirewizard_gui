@@ -127,6 +127,14 @@ jobs:
         run: |
           & .\packaging\windows\prepare.ps1
 
+      - name: Run Windows unit tests
+        shell: powershell
+        run: |
+          & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows unit tests failed with exit code $LASTEXITCODE."
+          }
+
       - name: Build portable ZIP and installer
         shell: powershell
         env:
@@ -137,18 +145,45 @@ jobs:
       - name: Smoke-test the Windows executable
         shell: pwsh
         run: |
-          $exe = Resolve-Path .\packaging\windows\dist\WireWizardGUI\WireWizardGUI.exe
+          $exe = (Resolve-Path .\packaging\windows\dist\WireWizardGUI\WireWizardGUI.exe).Path
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing executable: $exe" }
-          $process = Start-Process -FilePath $exe -PassThru
+          $state = Join-Path $env:RUNNER_TEMP "wirewizardgui-smoke"
+          $log = Join-Path $state "logs\wirewizardgui.log"
+          if (Test-Path -LiteralPath $state) {
+              Remove-Item -LiteralPath $state -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $state -Force | Out-Null
+          $previousDataDir = $env:WIREWIZARD_DATA_DIR
+          $env:WIREWIZARD_DATA_DIR = $state
           try {
-              if ($process.WaitForExit(15000)) {
-                  throw "WireWizardGUI exited during startup with code $($process.ExitCode)."
+              Start-Process -FilePath $exe | Out-Null
+              $ready = $false
+              for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                  Start-Sleep -Milliseconds 500
+                  if (Test-Path -LiteralPath $log -PathType Leaf) {
+                      $logText = Get-Content -LiteralPath $log -Raw -Encoding UTF8
+                      if ($logText.Contains("Runtime log:")) {
+                          $ready = $true
+                          break
+                      }
+                  }
+              }
+              if (-not $ready) {
+                  $logText = if (Test-Path -LiteralPath $log -PathType Leaf) {
+                      Get-Content -LiteralPath $log -Raw -Encoding UTF8
+                  } else {
+                      "<runtime log was not created>"
+                  }
+                  throw "WireWizardGUI did not finish startup within 15 seconds. Runtime log:`n$logText"
               }
           } finally {
-              if (-not $process.HasExited) {
-                  Stop-Process -Id $process.Id -Force
-                  $process.WaitForExit()
-              }
+              $env:WIREWIZARD_DATA_DIR = $previousDataDir
+              Get-CimInstance Win32_Process |
+                  Where-Object { $_.ExecutablePath -eq $exe } |
+                  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          }
+          if ($logText -match "WireViz preview rendering failed| ERROR | CRITICAL ") {
+              throw "WireWizardGUI logged a startup or preview error:`n$logText"
           }
 
       - name: Upload Windows artifacts
