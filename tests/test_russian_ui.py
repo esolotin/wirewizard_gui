@@ -132,6 +132,40 @@ class RussianUiTests(unittest.TestCase):
         self.assertGreaterEqual(editor.table.columnCount(), 13)
         self.assertEqual([item.route for item in saved], routes)
 
+    def test_connections_editor_filters_next_step_by_previous_kind(self) -> None:
+        from wirewizard_gui.domain.models import CableModel, ConnectorModel, FerruleModel
+        from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
+
+        editor = ConnectionsEditor()
+        self.addCleanup(editor.close)
+        editor.set_component_sources(
+            [ConnectorModel(name="X1"), ConnectorModel(name="X2")],
+            [CableModel(name="W1")],
+            [FerruleModel(name="F1")],
+        )
+        editor.add_row()
+
+        def options(col: int) -> set[str]:
+            combo = editor.table.cellWidget(0, col).component_combo
+            return {
+                str(combo.itemData(index))
+                for index in range(combo.count())
+                if combo.itemData(index) is not None
+            }
+
+        self.assertEqual(options(0), {"X1", "X2", "W1", "F1"})
+        self.assertEqual(options(1), {"W1", "->", "-->", "<=>"})
+        self.assertEqual(options(2), {"X1", "X2", "F1"})
+
+        first_combo = editor.table.cellWidget(0, 0).component_combo
+        first_combo.setCurrentIndex(first_combo.findData("W1"))
+        self.assertEqual(options(1), {"X1", "X2", "F1"})
+
+        first_combo.setCurrentIndex(first_combo.findData("X1"))
+        second_combo = editor.table.cellWidget(0, 1).component_combo
+        second_combo.setCurrentIndex(second_combo.findData("-->"))
+        self.assertEqual(options(2), {"X1", "X2", "F1"})
+
     def test_svg_preview_zoom_highlight_and_export(self) -> None:
         from wirewizard_gui.ui.panels.svg_preview import SvgPreviewPanel
 

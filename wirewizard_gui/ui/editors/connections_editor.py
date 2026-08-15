@@ -61,7 +61,12 @@ class _RouteCell(QWidget):
             self.component_combo.clear()
             self.component_combo.addItem("")
             for name, kind, _values in ordered_components:
-                label = name if kind != "ferrule" else f"{name} (наконечник)"
+                if kind == "ferrule":
+                    label = f"{name} (наконечник)"
+                elif kind == "arrow":
+                    label = f"{name} (стрелка)"
+                else:
+                    label = name
                 self.component_combo.addItem(label, userData=name)
             self.component_combo.blockSignals(False)
             self.set_component(current_component)
@@ -161,6 +166,7 @@ class ConnectionsEditor(QWidget):
 
         self.help_label = QLabel(
             "Табличный редактор соединений. В каждой ячейке выберите компонент и номер контакта или жилы. "
+            "Список следующего шага автоматически чередует разъёмы с кабелями или стрелками. "
             "Пустые конечные ячейки игнорируются; для экрана используйте значение 's'."
         )
         self.help_label.setWordWrap(True)
@@ -224,13 +230,16 @@ class ConnectionsEditor(QWidget):
         self.table.insertRow(row)
         for col in range(self.table.columnCount()):
             cell = _RouteCell(self.table)
-            cell.set_component_options(self._component_options())
-            cell.content_changed.connect(self._emit_content_changed)
+            cell.set_component_options(self._component_options_for_position(row, col))
+            cell.content_changed.connect(
+                lambda current_cell=cell: self._cell_content_changed(current_cell)
+            )
             self.table.setCellWidget(row, col, cell)
         if route:
             self._apply_route_to_row(row, route)
         else:
             self._prefill_row(row)
+            self._refresh_row_options(row)
         self.table.setCurrentCell(row, 0)
         self._emit_content_changed()
 
@@ -283,7 +292,49 @@ class ConnectionsEditor(QWidget):
             options.append((item.name, "cable", values))
         for item in self.ferrules:
             options.append((item.name, "ferrule", []))
+        for arrow in ("->", "-->", "<=>"):
+            options.append((arrow, "arrow", []))
         return options
+
+    def _component_options_for_position(
+        self, row: int, col: int
+    ) -> list[tuple[str, str, list[str]]]:
+        previous_kind: str | None = None
+        for previous_col in range(col - 1, -1, -1):
+            previous_cell = self.table.cellWidget(row, previous_col)
+            if not isinstance(previous_cell, _RouteCell):
+                continue
+            component = previous_cell.component()
+            if component:
+                previous_kind = self._component_kind(component)
+                break
+
+        options = self._component_options()
+        if previous_kind == "connector":
+            return [item for item in options if item[1] in {"cable", "arrow"}]
+        if previous_kind == "cable_or_arrow":
+            return [item for item in options if item[1] in {"connector", "ferrule"}]
+        return [item for item in options if item[1] != "arrow"]
+
+    def _component_kind(self, component: str) -> str | None:
+        if ProjectSerializer._is_arrow(component):
+            return "cable_or_arrow"
+        base_name = component.split(".", 1)[0]
+        if any(item.name == base_name for item in [*self.connectors, *self.ferrules]):
+            return "connector"
+        if any(item.name == base_name for item in self.cables):
+            return "cable_or_arrow"
+        if component.startswith("[") and component.endswith("]"):
+            parsed = ProjectSerializer._parse_connection_part(component)
+            if isinstance(parsed, list):
+                kinds = {
+                    kind
+                    for value in parsed
+                    if (kind := self._component_kind(str(value))) is not None
+                }
+                if len(kinds) == 1:
+                    return kinds.pop()
+        return None
 
     def _rebuild_headers(self) -> None:
         self.table.setHorizontalHeaderLabels([f"Шаг {idx}" for idx in range(1, self.table.columnCount() + 1)])
@@ -308,12 +359,13 @@ class ConnectionsEditor(QWidget):
 
         self.table.setColumnCount(count)
         self.steps_spin.setMaximum(max(self.steps_spin.maximum(), count))
-        options = self._component_options()
         for row in range(self.table.rowCount()):
             for col in range(old_count, count):
                 cell = _RouteCell(self.table)
-                cell.set_component_options(options)
-                cell.content_changed.connect(self._emit_content_changed)
+                cell.set_component_options(self._component_options_for_position(row, col))
+                cell.content_changed.connect(
+                    lambda current_cell=cell: self._cell_content_changed(current_cell)
+                )
                 self.table.setCellWidget(row, col, cell)
         self._rebuild_headers()
 
@@ -321,13 +373,25 @@ class ConnectionsEditor(QWidget):
         if not self._suppress_content_changed:
             self.content_changed.emit()
 
-    def _refresh_all_cell_options(self) -> None:
-        options = self._component_options()
+    def _cell_content_changed(self, changed_cell: _RouteCell) -> None:
         for row in range(self.table.rowCount()):
             for col in range(self.table.columnCount()):
-                cell = self.table.cellWidget(row, col)
-                if isinstance(cell, _RouteCell):
-                    cell.set_component_options(options)
+                if self.table.cellWidget(row, col) is changed_cell:
+                    self._refresh_row_options(row, col + 1)
+                    self._emit_content_changed()
+                    return
+
+    def _refresh_all_cell_options(self) -> None:
+        for row in range(self.table.rowCount()):
+            self._refresh_row_options(row)
+
+    def _refresh_row_options(self, row: int, start_col: int = 0) -> None:
+        for col in range(start_col, self.table.columnCount()):
+            cell = self.table.cellWidget(row, col)
+            if isinstance(cell, _RouteCell):
+                cell.set_component_options(
+                    self._component_options_for_position(row, col)
+                )
 
     def _prefill_row(self, row: int) -> None:
         if not self.connectors or not self.cables:
@@ -362,6 +426,7 @@ class ConnectionsEditor(QWidget):
             cell = self.table.cellWidget(row, col)
             if isinstance(cell, _RouteCell):
                 cell.set_part(_PartModel(str(component).strip(), value))
+        self._refresh_row_options(row)
         needed = max(3, len(parts))
         if needed > self.visible_steps:
             self._set_visible_steps(needed)
