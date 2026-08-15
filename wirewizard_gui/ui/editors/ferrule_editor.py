@@ -4,7 +4,13 @@ from PySide6.QtWidgets import QCheckBox, QFormLayout, QLineEdit, QPlainTextEdit,
 
 from wirewizard_gui.domain.models import FerruleModel
 from wirewizard_gui.domain.options import FERRULE_SUBTYPES, FERRULE_TYPES, WIRE_COLORS
-from wirewizard_gui.ui.editors.common import build_combo, set_combo_text
+from wirewizard_gui.ui.editors.common import (
+    WIRE_COLOR_HELP,
+    build_combo,
+    set_combo_hint,
+    set_combo_text,
+    set_text_hint,
+)
 
 
 class FerruleEditor(QWidget):
@@ -23,6 +29,22 @@ class FerruleEditor(QWidget):
         self.spn_edit = QLineEdit()
         self.ignore_in_bom_check = QCheckBox("Не включать в BOM")
         self.notes_edit = QPlainTextEdit()
+
+        set_text_hint(self.name_edit, "Например: F1", "Уникальное обозначение наконечника.")
+        set_combo_hint(self.type_combo, "Выберите или введите тип наконечника")
+        set_combo_hint(
+            self.subtype_combo,
+            "Например: 0.5 mm²",
+            "Размер наконечника по сечению провода.",
+        )
+        set_combo_hint(self.color_combo, "Например: OG", WIRE_COLOR_HELP)
+        set_text_hint(self.pn_edit, "Например: FERRULE-050", "Внутренний номер детали в BOM.")
+        set_text_hint(self.manufacturer_edit, "Например: Phoenix Contact")
+        set_text_hint(self.mpn_edit, "Артикул производителя", "Артикул производителя (MPN).")
+        set_text_hint(self.supplier_edit, "Например: Mouser")
+        set_text_hint(self.spn_edit, "Артикул поставщика", "Артикул поставщика (SPN).")
+        self.ignore_in_bom_check.setToolTip("Не добавлять наконечник в спецификацию WireViz.")
+        set_text_hint(self.notes_edit, "Свободный комментарий к наконечнику")
 
         layout = QFormLayout(self)
         layout.addRow("Обозначение", self.name_edit)

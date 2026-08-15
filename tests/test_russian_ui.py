@@ -94,6 +94,27 @@ class RussianUiTests(unittest.TestCase):
         self.assertIsNotNone(dialog.selected_preset())
         self.assertTrue(dialog.description.text())
 
+    def test_editors_show_examples_and_wireviz_code_hints(self) -> None:
+        from wirewizard_gui.ui.editors.cable_editor import CableEditor
+        from wirewizard_gui.ui.editors.connector_editor import ConnectorEditor
+        from wirewizard_gui.ui.editors.ferrule_editor import FerruleEditor
+
+        connector = ConnectorEditor()
+        cable = CableEditor()
+        ferrule = FerruleEditor()
+        self.addCleanup(connector.close)
+        self.addCleanup(cable.close)
+        self.addCleanup(ferrule.close)
+
+        self.assertIn("A, B", connector.pins_edit.placeholderText())
+        self.assertIn("GND", connector.pinlabels_edit.placeholderText())
+        self.assertIn("RD, BK", cable.colors_edit.placeholderText())
+        self.assertIn("GNYE", cable.colors_edit.toolTip())
+        self.assertIn("CAN_H", cable.wirelabels_edit.placeholderText())
+        self.assertIn("жиле 1", cable.wirelabels_edit.toolTip())
+        self.assertIn("DIN", cable.color_code_combo.toolTip())
+        self.assertIn("OG", ferrule.color_combo.lineEdit().placeholderText())
+
     def test_connections_editor_preserves_arrows_and_parallel_groups(self) -> None:
         from wirewizard_gui.domain.models import (
             CableModel,

@@ -11,7 +11,13 @@ from PySide6.QtWidgets import (
 
 from wirewizard_gui.domain.models import CableModel
 from wirewizard_gui.domain.options import CABLE_TYPES, COLOR_CODES, GAUGES, LENGTHS
-from wirewizard_gui.ui.editors.common import build_combo, set_combo_text
+from wirewizard_gui.ui.editors.common import (
+    WIRE_COLOR_HELP,
+    build_combo,
+    set_combo_hint,
+    set_combo_text,
+    set_text_hint,
+)
 
 
 class CableEditor(QWidget):
@@ -38,6 +44,53 @@ class CableEditor(QWidget):
         self.spn_edit = QLineEdit()
         self.ignore_in_bom_check = QCheckBox("Не включать в BOM")
         self.notes_edit = QPlainTextEdit()
+
+        set_text_hint(
+            self.name_edit,
+            "Например: W1",
+            "Уникальное обозначение кабеля в проекте: W1, W2 и т. п.",
+        )
+        set_combo_hint(self.type_combo, "Выберите или введите тип кабеля")
+        set_combo_hint(
+            self.gauge_combo,
+            "Например: 0.25 mm2",
+            "Сечение одной жилы. Пример формата WireViz: 0.25 mm2.",
+        )
+        set_combo_hint(
+            self.length_combo,
+            "Например: 0.5 m",
+            "Длина кабеля с единицей измерения. Пример: 0.5 m.",
+        )
+        self.wirecount_spin.setToolTip(
+            "Количество жил. Цвета и метки перечисляются в том же порядке: первая запись для жилы 1."
+        )
+        set_text_hint(
+            self.colors_edit,
+            "Например: RD, BK, GNYE",
+            f"Цвета жил через запятую; порядок соответствует номерам жил. {WIRE_COLOR_HELP}",
+        )
+        set_combo_hint(
+            self.color_code_combo,
+            "Например: DIN",
+            "Встроенная последовательность цветов WireViz: DIN, IEC или TEL. "
+            "Оставьте пустым при явном списке цветов.",
+        )
+        set_text_hint(
+            self.wirelabels_edit,
+            "Например: +24V, GND, CAN_H",
+            "Метки жил через запятую; первая метка относится к жиле 1, вторая — к жиле 2 и т. д.",
+        )
+        self.shield_check.setToolTip(
+            "Добавить общий экран кабеля. В соединениях экран выбирается значением s."
+        )
+        self.bundle_check.setToolTip("Экспортировать кабель как category: bundle.")
+        set_text_hint(self.pn_edit, "Например: CABLE-001", "Внутренний номер детали в вашей BOM.")
+        set_text_hint(self.manufacturer_edit, "Например: LAPP")
+        set_text_hint(self.mpn_edit, "Артикул производителя", "Артикул производителя (MPN).")
+        set_text_hint(self.supplier_edit, "Например: Чип и Дип")
+        set_text_hint(self.spn_edit, "Артикул поставщика", "Артикул поставщика (SPN).")
+        self.ignore_in_bom_check.setToolTip("Не добавлять этот кабель в спецификацию WireViz.")
+        set_text_hint(self.notes_edit, "Свободный комментарий к кабелю")
 
         layout = QFormLayout(self)
         layout.addRow("Обозначение", self.name_edit)

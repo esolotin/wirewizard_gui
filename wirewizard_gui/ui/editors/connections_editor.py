@@ -33,10 +33,18 @@ class _RouteCell(QWidget):
         self._suppress_content_changed = False
         self.component_combo = QComboBox()
         self.component_combo.setEditable(True)
+        self.component_combo.setToolTip(
+            "Выберите компонент. Список автоматически ограничен допустимым следующим шагом."
+        )
+        if self.component_combo.lineEdit() is not None:
+            self.component_combo.lineEdit().setPlaceholderText("Компонент или стрелка")
         self.value_combo = QComboBox()
         self.value_combo.setEditable(True)
         self.value_combo.setInsertPolicy(QComboBox.NoInsert)
         self.value_combo.setMinimumContentsLength(8)
+        self.value_combo.setToolTip("Номер или метка контакта/жилы; s означает экран кабеля.")
+        if self.value_combo.lineEdit() is not None:
+            self.value_combo.lineEdit().setPlaceholderText("Контакт / жила")
 
         layout = QGridLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -130,10 +138,18 @@ class _RouteCell(QWidget):
             self.value_combo.blockSignals(True)
             self.value_combo.clear()
             self.value_combo.addItem("")
+            hint = "Номер или метка контакта/жилы; s означает экран кабеля."
             if component_name and component_name in self._component_meta:
-                _kind, values = self._component_meta[component_name]
+                kind, values = self._component_meta[component_name]
                 for value in values:
                     self.value_combo.addItem(value)
+                if kind == "connector":
+                    hint = "Номер, обозначение или метка контакта разъёма."
+                elif kind == "cable":
+                    hint = "Номер или метка жилы; s означает экран кабеля."
+                else:
+                    hint = "Для наконечника или стрелки значение обычно не требуется."
+            self.value_combo.setToolTip(hint)
             self.value_combo.blockSignals(False)
             self.set_value(current_value)
         finally:

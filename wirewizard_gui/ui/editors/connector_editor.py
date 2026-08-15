@@ -11,7 +11,13 @@ from PySide6.QtWidgets import (
 
 from wirewizard_gui.domain.models import ConnectorModel
 from wirewizard_gui.domain.options import CONNECTOR_SUBTYPES, CONNECTOR_TYPES, WIRE_COLORS
-from wirewizard_gui.ui.editors.common import build_combo, set_combo_text
+from wirewizard_gui.ui.editors.common import (
+    WIRE_COLOR_HELP,
+    build_combo,
+    set_combo_hint,
+    set_combo_text,
+    set_text_hint,
+)
 
 
 class ConnectorEditor(QWidget):
@@ -37,6 +43,45 @@ class ConnectorEditor(QWidget):
         self.ignore_in_bom_check = QCheckBox("Не включать в BOM")
         self.notes_edit = QPlainTextEdit()
         self.simple_check.toggled.connect(self._update_simple_state)
+
+        set_text_hint(
+            self.name_edit,
+            "Например: X1",
+            "Уникальное обозначение разъёма в проекте: X1, X2, J1 и т. п.",
+        )
+        set_combo_hint(self.type_combo, "Выберите или введите тип разъёма")
+        set_combo_hint(
+            self.subtype_combo,
+            "Например: male или female",
+            "Технический подтип WireViz: male, female, plug или socket.",
+        )
+        self.pincount_spin.setToolTip(
+            "Общее число контактов. Списки обозначений и меток обычно содержат столько же элементов."
+        )
+        set_text_hint(
+            self.pins_edit,
+            "Например: 1, 2, A, B",
+            "Обозначения контактов через запятую в порядке подключения. "
+            "Их можно использовать вместо числовых индексов в соединениях.",
+        )
+        set_text_hint(
+            self.pinlabels_edit,
+            "Например: +24V, GND, SIGNAL",
+            "Понятные подписи контактов через запятую. Порядок соответствует списку контактов.",
+        )
+        set_combo_hint(
+            self.color_combo, "Например: BK", f"Цвет корпуса или обозначения. {WIRE_COLOR_HELP}"
+        )
+        self.simple_check.setToolTip(
+            "Экспортировать как style: simple без количества и списка контактов."
+        )
+        set_text_hint(self.pn_edit, "Например: CONN-001", "Внутренний номер детали в вашей BOM.")
+        set_text_hint(self.manufacturer_edit, "Например: Molex")
+        set_text_hint(self.mpn_edit, "Например: 22-01-2027", "Артикул производителя (MPN).")
+        set_text_hint(self.supplier_edit, "Например: Mouser")
+        set_text_hint(self.spn_edit, "Например: 538-22-01-2027", "Артикул поставщика (SPN).")
+        self.ignore_in_bom_check.setToolTip("Не добавлять этот компонент в спецификацию WireViz.")
+        set_text_hint(self.notes_edit, "Свободный комментарий к разъёму")
 
         layout = QFormLayout(self)
         layout.addRow("Обозначение", self.name_edit)
