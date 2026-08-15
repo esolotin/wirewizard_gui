@@ -80,6 +80,20 @@ class RussianUiTests(unittest.TestCase):
         self.assertEqual(dialog.plan().mode, "star")
         self.assertTrue({"Создать", "Отмена"}.issubset(button_texts))
 
+    def test_component_library_has_russian_tabs_and_presets(self) -> None:
+        from wirewizard_gui.ui.dialogs.component_library import ComponentLibraryDialog
+
+        dialog = ComponentLibraryDialog()
+        self.addCleanup(dialog.close)
+
+        self.assertEqual(dialog.windowTitle(), "Библиотека компонентов")
+        self.assertEqual(
+            [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
+            ["Разъёмы", "Кабели", "Наконечники"],
+        )
+        self.assertIsNotNone(dialog.selected_preset())
+        self.assertTrue(dialog.description.text())
+
     def test_connections_editor_preserves_arrows_and_parallel_groups(self) -> None:
         from wirewizard_gui.domain.models import (
             CableModel,

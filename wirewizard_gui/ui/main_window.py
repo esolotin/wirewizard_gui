@@ -42,6 +42,7 @@ from wirewizard_gui.services.session_service import SessionService
 from wirewizard_gui.services.wireviz_service import WireVizService
 from wirewizard_gui.services.wireviz_tasks import WireVizTask
 from wirewizard_gui.ui.dialogs.daisy_chain_wizard import BulkWiringWizard
+from wirewizard_gui.ui.dialogs.component_library import ComponentLibraryDialog
 from wirewizard_gui.ui.document_history import ProjectSnapshotCommand
 from wirewizard_gui.ui.editors.cable_editor import CableEditor
 from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
@@ -173,6 +174,7 @@ class MainWindow(QMainWindow):
             ("Экспорт YAML", self.export_yaml),
             ("Построить в WireViz", self.run_wireviz),
             ("Массовая разводка", self.open_bulk_wiring_wizard),
+            ("Библиотека компонентов", self.open_component_library),
             ("Обновить предпросмотр", self.refresh_preview),
         ]
         self.toolbar_buttons: dict[str, QPushButton] = {}
@@ -707,6 +709,8 @@ class MainWindow(QMainWindow):
         if kind in {"project", "group_connections", "connections", None}:
             add_action("Добавить строку соединения", self.add_connection_row)
             add_action("Открыть мастер разводки", self.open_bulk_wiring_wizard)
+        if kind in {"project", None}:
+            add_action("Открыть библиотеку компонентов", self.open_component_library)
 
         if kind in {"connector", "cable", "ferrule"}:
             menu.addSeparator()
@@ -721,6 +725,36 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         add_action("Обновить предпросмотр", self.refresh_preview)
         menu.exec(self.project_tree.viewport().mapToGlobal(pos))
+
+    def open_component_library(self) -> None:
+        dialog = ComponentLibraryDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        preset = dialog.selected_preset()
+        if preset is None:
+            return
+
+        before = self.project.to_dict()
+        if preset.kind == "connector":
+            collection = self.project.connectors
+            prefix = "X"
+            group_index = 0
+        elif preset.kind == "cable":
+            collection = self.project.cables
+            prefix = "W"
+            group_index = 1
+        else:
+            collection = self.project.ferrules
+            prefix = "F"
+            group_index = 2
+        name = self._next_name(prefix, [item.name for item in collection])
+        collection.append(preset.create(name))
+        self._refresh_tree()
+        group = self.project_tree.topLevelItem(0).child(group_index)
+        self.project_tree.setCurrentItem(group.child(group.childCount() - 1))
+        self._update_dirty_state()
+        self._record_project_change(before, "Добавление компонента из библиотеки")
+        self.statusBar().showMessage(f"Добавлен компонент {name}: {preset.title}", 5000)
 
     def new_project(self) -> None:
         if not self._confirm_unsaved_changes("создать новый проект"):

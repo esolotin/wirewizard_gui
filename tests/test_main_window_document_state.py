@@ -1092,6 +1092,28 @@ class MainWindowDocumentStateTests(unittest.TestCase):
                     shortcut,
                 )
 
+    def test_component_library_addition_is_reversible(self) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from wirewizard_gui.domain.component_library import presets_for
+
+        window = self._make_window()
+        count = len(window.project.connectors)
+        preset = presets_for("connector")[0]
+        with patch("wirewizard_gui.ui.main_window.ComponentLibraryDialog") as dialog_class:
+            dialog_class.return_value.exec.return_value = QDialog.DialogCode.Accepted
+            dialog_class.return_value.selected_preset.return_value = preset
+            window.open_component_library()
+
+        self.assertEqual(len(window.project.connectors), count + 1)
+        added = window.project.connectors[-1]
+        self.assertEqual(added.name, "X4")
+        self.assertEqual(added.type, "Molex KK 254")
+        self.assertTrue(window._dirty)
+        window.undo_stack.undo()
+        self._wait_for_wireviz(window)
+        self.assertEqual(len(window.project.connectors), count)
+
 
 if __name__ == "__main__":
     unittest.main()
