@@ -13,6 +13,7 @@ from wirewizard_gui.domain.models import CableModel
 from wirewizard_gui.domain.options import CABLE_TYPES, COLOR_CODES, GAUGES, LENGTHS
 from wirewizard_gui.ui.editors.common import (
     WIRE_COLOR_HELP,
+    build_help_field,
     build_combo,
     set_combo_hint,
     set_combo_text,
@@ -67,7 +68,13 @@ class CableEditor(QWidget):
         set_text_hint(
             self.colors_edit,
             "Например: RD, BK, GNYE",
-            f"Цвета жил через запятую; порядок соответствует номерам жил. {WIRE_COLOR_HELP}",
+            "Цвета через запятую в порядке жил. Нажмите ? для легенды кодов.",
+        )
+        self.colors_field, self.colors_help_btn = build_help_field(
+            self.colors_edit,
+            "Коды цветов жил WireViz",
+            WIRE_COLOR_HELP
+            + "\n\nУказывайте коды через запятую в порядке жил: первая запись — жила 1.",
         )
         set_combo_hint(
             self.color_code_combo,
@@ -98,7 +105,7 @@ class CableEditor(QWidget):
         layout.addRow("Сечение", self.gauge_combo)
         layout.addRow("Длина", self.length_combo)
         layout.addRow("Количество жил", self.wirecount_spin)
-        layout.addRow("Цвета жил (через запятую)", self.colors_edit)
+        layout.addRow("Цвета жил (через запятую)", self.colors_field)
         layout.addRow("Стандарт цветов", self.color_code_combo)
         layout.addRow("Метки жил (через запятую)", self.wirelabels_edit)
         layout.addRow("", self.shield_check)

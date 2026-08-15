@@ -13,6 +13,7 @@ from wirewizard_gui.domain.models import ConnectorModel
 from wirewizard_gui.domain.options import CONNECTOR_SUBTYPES, CONNECTOR_TYPES, WIRE_COLORS
 from wirewizard_gui.ui.editors.common import (
     WIRE_COLOR_HELP,
+    build_help_field,
     build_combo,
     set_combo_hint,
     set_combo_text,
@@ -70,7 +71,12 @@ class ConnectorEditor(QWidget):
             "Понятные подписи контактов через запятую. Порядок соответствует списку контактов.",
         )
         set_combo_hint(
-            self.color_combo, "Например: BK", f"Цвет корпуса или обозначения. {WIRE_COLOR_HELP}"
+            self.color_combo,
+            "Например: BK",
+            "Цвет корпуса или обозначения. Нажмите ? для легенды кодов.",
+        )
+        self.color_field, self.color_help_btn = build_help_field(
+            self.color_combo, "Коды цветов WireViz", WIRE_COLOR_HELP
         )
         self.simple_check.setToolTip(
             "Экспортировать как style: simple без количества и списка контактов."
@@ -90,7 +96,7 @@ class ConnectorEditor(QWidget):
         layout.addRow("Количество контактов", self.pincount_spin)
         layout.addRow("Контакты / обозначения (через запятую)", self.pins_edit)
         layout.addRow("Метки контактов (через запятую)", self.pinlabels_edit)
-        layout.addRow("Цвет", self.color_combo)
+        layout.addRow("Цвет", self.color_field)
         layout.addRow("", self.simple_check)
         layout.addRow("Внутренний P/N", self.pn_edit)
         layout.addRow("Производитель", self.manufacturer_edit)

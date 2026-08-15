@@ -95,6 +95,7 @@ class RussianUiTests(unittest.TestCase):
         self.assertTrue(dialog.description.text())
 
     def test_editors_show_examples_and_wireviz_code_hints(self) -> None:
+        from wirewizard_gui.ui.editors import common
         from wirewizard_gui.ui.editors.cable_editor import CableEditor
         from wirewizard_gui.ui.editors.connector_editor import ConnectorEditor
         from wirewizard_gui.ui.editors.ferrule_editor import FerruleEditor
@@ -109,11 +110,19 @@ class RussianUiTests(unittest.TestCase):
         self.assertIn("A, B", connector.pins_edit.placeholderText())
         self.assertIn("GND", connector.pinlabels_edit.placeholderText())
         self.assertIn("RD, BK", cable.colors_edit.placeholderText())
-        self.assertIn("GNYE", cable.colors_edit.toolTip())
+        self.assertIn("Нажмите ?", cable.colors_edit.toolTip())
         self.assertIn("CAN_H", cable.wirelabels_edit.placeholderText())
         self.assertIn("жиле 1", cable.wirelabels_edit.toolTip())
         self.assertIn("DIN", cable.color_code_combo.toolTip())
         self.assertIn("OG", ferrule.color_combo.lineEdit().placeholderText())
+        self.assertGreaterEqual(common.WIRE_COLOR_HELP.count("\n"), 12)
+        with patch.object(common.QMessageBox, "information") as information:
+            cable.colors_help_btn.click()
+        information.assert_called_once()
+        title, message = information.call_args.args[1:]
+        self.assertEqual(title, "Коды цветов жил WireViz")
+        self.assertIn("BK — чёрный\n", message)
+        self.assertIn("GNYE — зелёно-жёлтый", message)
 
     def test_connections_editor_preserves_arrows_and_parallel_groups(self) -> None:
         from wirewizard_gui.domain.models import (

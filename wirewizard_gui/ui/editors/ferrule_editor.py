@@ -6,6 +6,7 @@ from wirewizard_gui.domain.models import FerruleModel
 from wirewizard_gui.domain.options import FERRULE_SUBTYPES, FERRULE_TYPES, WIRE_COLORS
 from wirewizard_gui.ui.editors.common import (
     WIRE_COLOR_HELP,
+    build_help_field,
     build_combo,
     set_combo_hint,
     set_combo_text,
@@ -37,7 +38,14 @@ class FerruleEditor(QWidget):
             "Например: 0.5 mm²",
             "Размер наконечника по сечению провода.",
         )
-        set_combo_hint(self.color_combo, "Например: OG", WIRE_COLOR_HELP)
+        set_combo_hint(
+            self.color_combo,
+            "Например: OG",
+            "Цвет наконечника. Нажмите ? для легенды кодов.",
+        )
+        self.color_field, self.color_help_btn = build_help_field(
+            self.color_combo, "Коды цветов WireViz", WIRE_COLOR_HELP
+        )
         set_text_hint(self.pn_edit, "Например: FERRULE-050", "Внутренний номер детали в BOM.")
         set_text_hint(self.manufacturer_edit, "Например: Phoenix Contact")
         set_text_hint(self.mpn_edit, "Артикул производителя", "Артикул производителя (MPN).")
@@ -50,7 +58,7 @@ class FerruleEditor(QWidget):
         layout.addRow("Обозначение", self.name_edit)
         layout.addRow("Тип", self.type_combo)
         layout.addRow("Подтип", self.subtype_combo)
-        layout.addRow("Цвет", self.color_combo)
+        layout.addRow("Цвет", self.color_field)
         layout.addRow("Внутренний P/N", self.pn_edit)
         layout.addRow("Производитель", self.manufacturer_edit)
         layout.addRow("MPN производителя", self.mpn_edit)

@@ -1,14 +1,50 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit
-
-
-WIRE_COLOR_HELP = (
-    "Коды цветов WireViz: BK — чёрный, BN — коричневый, BU — синий, "
-    "GN — зелёный, GY — серый, OG — оранжевый, PK — розовый, "
-    "RD — красный, VT — фиолетовый, WH — белый, YE — жёлтый, "
-    "GNYE — зелёно-жёлтый."
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QToolButton,
+    QWidget,
 )
+
+
+WIRE_COLOR_HELP = """Коды цветов WireViz:
+BK — чёрный
+BN — коричневый
+BU — синий
+GN — зелёный
+GY — серый
+OG — оранжевый
+PK — розовый
+RD — красный
+VT — фиолетовый
+WH — белый
+YE — жёлтый
+GNYE — зелёно-жёлтый"""
+
+
+def build_help_field(
+    field: QWidget, title: str, help_text: str
+) -> tuple[QWidget, QToolButton]:
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(field, 1)
+
+    button = QToolButton()
+    button.setText("?")
+    button.setToolTip(f"Открыть справку: {title.lower()}")
+    button.setAccessibleName(f"Справка: {title}")
+    button.clicked.connect(
+        lambda _checked=False: QMessageBox.information(
+            container, title, help_text
+        )
+    )
+    layout.addWidget(button)
+    return container, button
 
 
 def set_text_hint(
