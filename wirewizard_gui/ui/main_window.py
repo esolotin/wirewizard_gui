@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from wirewizard_gui.domain.models import (
+    AnnotationModel,
     CableModel,
     ConnectionRowModel,
     ConnectorModel,
@@ -44,6 +45,7 @@ from wirewizard_gui.services.wireviz_tasks import WireVizTask
 from wirewizard_gui.ui.dialogs.daisy_chain_wizard import BulkWiringWizard
 from wirewizard_gui.ui.dialogs.component_library import ComponentLibraryDialog
 from wirewizard_gui.ui.document_history import ProjectSnapshotCommand
+from wirewizard_gui.ui.editors.annotation_editor import AnnotationEditor
 from wirewizard_gui.ui.editors.cable_editor import CableEditor
 from wirewizard_gui.ui.editors.connections_editor import ConnectionsEditor
 from wirewizard_gui.ui.editors.connector_editor import ConnectorEditor
@@ -117,6 +119,7 @@ class MainWindow(QMainWindow):
         self.connector_editor = ConnectorEditor()
         self.cable_editor = CableEditor()
         self.ferrule_editor = FerruleEditor()
+        self.annotation_editor = AnnotationEditor()
         self.connections_editor = ConnectionsEditor()
         self.connections_editor.set_component_sources(self.project.connectors, self.project.cables, self.project.ferrules)
         self.placeholder = QLabel("Выбери элемент в дереве слева.")
@@ -128,6 +131,7 @@ class MainWindow(QMainWindow):
         self.editor_stack.addWidget(self.connector_editor)
         self.editor_stack.addWidget(self.cable_editor)
         self.editor_stack.addWidget(self.ferrule_editor)
+        self.editor_stack.addWidget(self.annotation_editor)
         self.editor_stack.addWidget(self.connections_editor)
 
         self.yaml_preview = YamlPreviewPanel()
@@ -203,6 +207,7 @@ class MainWindow(QMainWindow):
             ("Построить в WireViz", self.run_wireviz),
             ("Массовая разводка", self.open_bulk_wiring_wizard),
             ("Библиотека компонентов", self.open_component_library),
+            ("Добавить примечание", self.add_annotation),
             ("Обновить предпросмотр", self.refresh_preview),
         ]
         self.toolbar_buttons: dict[str, QAction] = {}
@@ -391,6 +396,7 @@ class MainWindow(QMainWindow):
             self.cable_editor.colors_edit,
             self.cable_editor.wirelabels_edit,
             self.ferrule_editor.name_edit,
+            self.annotation_editor.title_edit,
             self.connector_editor.pn_edit,
             self.connector_editor.manufacturer_edit,
             self.connector_editor.mpn_edit,
@@ -416,6 +422,7 @@ class MainWindow(QMainWindow):
             self.connector_editor.notes_edit,
             self.cable_editor.notes_edit,
             self.ferrule_editor.notes_edit,
+            self.annotation_editor.text_edit,
         ]
         for editor in plain_text_edits:
             editor.textChanged.connect(self._on_editor_content_changed)
@@ -500,15 +507,18 @@ class MainWindow(QMainWindow):
         cables_root = QTreeWidgetItem(["Кабели"])
         ferrules_root = QTreeWidgetItem(["Наконечники"])
         connections_root = QTreeWidgetItem(["Соединения"])
+        annotations_root = QTreeWidgetItem(["Примечания"])
         connectors_root.setData(0, Qt.UserRole, ("group_connectors", None))
         cables_root.setData(0, Qt.UserRole, ("group_cables", None))
         ferrules_root.setData(0, Qt.UserRole, ("group_ferrules", None))
         connections_root.setData(0, Qt.UserRole, ("group_connections", None))
+        annotations_root.setData(0, Qt.UserRole, ("group_annotations", None))
 
         root.addChild(connectors_root)
         root.addChild(cables_root)
         root.addChild(ferrules_root)
         root.addChild(connections_root)
+        root.addChild(annotations_root)
 
         for item in self.project.connectors:
             node = QTreeWidgetItem([item.name])
@@ -529,6 +539,11 @@ class MainWindow(QMainWindow):
         node.setData(0, Qt.UserRole, ("connections", self.project.connections))
         connections_root.addChild(node)
 
+        for item in self.project.annotations:
+            node = QTreeWidgetItem([item.title or "Примечание"])
+            node.setData(0, Qt.UserRole, ("annotation", item))
+            annotations_root.addChild(node)
+
         self.project_tree.expandAll()
         self.connections_editor.set_component_sources(self.project.connectors, self.project.cables, self.project.ferrules)
 
@@ -547,6 +562,12 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         self._editor_pending = True
         self._save_current_editor(finalize_name=False)
+        if self.sender() is self.annotation_editor.title_edit:
+            current_tree_item = self.project_tree.currentItem()
+            if current_tree_item is not None:
+                current_tree_item.setText(
+                    0, self.annotation_editor.title_edit.text().strip() or "Примечание"
+                )
         component_name_edits = {
             self.connector_editor.name_edit,
             self.cable_editor.name_edit,
@@ -598,6 +619,8 @@ class MainWindow(QMainWindow):
                 elif idx == 4:
                     self.ferrule_editor.save_to_item()
                 elif idx == 5:
+                    self.annotation_editor.save_to_item()
+                elif idx == 6:
                     self.project.connections = self.connections_editor.save_to_items()
             finally:
                 self._editor_pending = False
@@ -809,9 +832,12 @@ class MainWindow(QMainWindow):
                 self._current_reference_item = (obj, obj.name)
                 self.editor_stack.setCurrentIndex(4)
                 self.svg_preview.set_highlight(obj.name)
+            elif kind == "annotation":
+                self.annotation_editor.load_item(obj)
+                self.editor_stack.setCurrentIndex(5)
             elif kind == "connections":
                 self.connections_editor.load_items(obj)
-                self.editor_stack.setCurrentIndex(5)
+                self.editor_stack.setCurrentIndex(6)
             else:
                 self.editor_stack.setCurrentIndex(0)
         self._editor_pending = False
@@ -849,13 +875,15 @@ class MainWindow(QMainWindow):
             add_action("Добавить кабель", self.add_cable)
         if kind in {"project", "group_ferrules", None}:
             add_action("Добавить наконечник", self.add_ferrule)
+        if kind in {"project", "group_annotations", None}:
+            add_action("Добавить примечание", self.add_annotation)
         if kind in {"project", "group_connections", "connections", None}:
             add_action("Добавить строку соединения", self.add_connection_row)
             add_action("Открыть мастер разводки", self.open_bulk_wiring_wizard)
         if kind in {"project", None}:
             add_action("Открыть библиотеку компонентов", self.open_component_library)
 
-        if kind in {"connector", "cable", "ferrule"}:
+        if kind in {"connector", "cable", "ferrule", "annotation"}:
             menu.addSeparator()
             add_action("Дублировать", self.duplicate_selected_item)
             add_action("Удалить", self.delete_selected_item)
@@ -1052,6 +1080,15 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
         self.refresh_preview()
 
+    def add_annotation(self) -> None:
+        self._save_current_editor()
+        before = self.project.to_dict()
+        self.project.annotations.append(AnnotationModel())
+        self._update_dirty_state()
+        self._record_project_change(before, "Добавление примечания")
+        self._refresh_tree()
+        self.refresh_preview()
+
     def add_connection_row(self) -> None:
         self._save_current_editor()
         before = self.project.to_dict()
@@ -1156,6 +1193,11 @@ class MainWindow(QMainWindow):
             clone.name = self._next_name("F", [item.name for item in self.project.ferrules])
             clone.id = uuid4().hex
             self.project.ferrules.append(clone)
+        elif kind == "annotation":
+            clone = deepcopy(obj)
+            clone.id = uuid4().hex
+            clone.title = f"{clone.title} — копия"
+            self.project.annotations.append(clone)
         elif kind == "connections":
             self.project.connections.extend(deepcopy(self.project.connections))
         else:
@@ -1186,6 +1228,8 @@ class MainWindow(QMainWindow):
             self.project.cables = [x for x in self.project.cables if x is not obj]
         elif kind == "ferrule":
             self.project.ferrules = [x for x in self.project.ferrules if x is not obj]
+        elif kind == "annotation":
+            self.project.annotations = [x for x in self.project.annotations if x is not obj]
         elif kind == "connections":
             self.project.connections = []
         else:

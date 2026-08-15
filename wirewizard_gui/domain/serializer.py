@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from copy import deepcopy
+from html import escape, unescape
 from typing import Any
 import re
+from uuid import uuid4
 
 import yaml
 
 from wirewizard_gui.domain.models import (
+    AnnotationModel,
     CableModel,
     ConnectionRowModel,
     ConnectorModel,
@@ -17,6 +20,7 @@ from wirewizard_gui.domain.models import (
 
 
 class ProjectSerializer:
+    _ANNOTATION_PREFIX = "__WW_NOTE_"
     _TOP_LEVEL_KEYS = {"metadata", "connectors", "cables", "connections"}
     _METADATA_KEYS = {"title", "description"}
     _CONNECTOR_KEYS = {
@@ -43,6 +47,7 @@ class ProjectSerializer:
             data["metadata"] = metadata
 
         connectors = OrderedDict()
+        annotation_names: list[str] = []
         for item in project.connectors:
             entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
@@ -75,6 +80,20 @@ class ProjectSerializer:
                 entry["notes"] = item.notes
             ProjectSerializer._add_bom_fields(entry, item)
             connectors[item.name] = entry
+
+        for item in project.annotations:
+            entry = OrderedDict()
+            entry["type"] = escape(item.title.strip() or "Примечание")
+            if item.text.strip():
+                entry["notes"] = escape(item.text.strip())
+            entry["style"] = "simple"
+            entry["show_name"] = False
+            entry["show_pincount"] = False
+            entry["ignore_in_bom"] = True
+            entry["bgcolor"] = "#fff8c5"
+            name = f"{ProjectSerializer._ANNOTATION_PREFIX}{item.id}"
+            connectors[name] = entry
+            annotation_names.append(name)
 
         if connectors:
             data["connectors"] = connectors
@@ -117,6 +136,11 @@ class ProjectSerializer:
                     items.append(parsed)
             if items:
                 connection_sets.append(items)
+
+        # A one-node connection set makes WireViz include the isolated note
+        # without reporting it as a forgotten component. Graphviz still lays
+        # it out as a separate box, so it cannot cover wires or components.
+        connection_sets.extend([[name] for name in annotation_names])
 
         if connection_sets:
             data["connections"] = connection_sets
@@ -171,6 +195,17 @@ class ProjectSerializer:
             notes = str(entry.get("notes", "") or "")
             pins = ProjectSerializer._string_list(entry.get("pins"))
             pinlabels = ProjectSerializer._string_list(entry.get("pinlabels") or entry.get("pinout"))
+
+            if is_simple and str(name).startswith(ProjectSerializer._ANNOTATION_PREFIX):
+                annotation_id = str(name)[len(ProjectSerializer._ANNOTATION_PREFIX):]
+                project.annotations.append(
+                    AnnotationModel(
+                        id=annotation_id or uuid4().hex,
+                        title=unescape(type_text) or "Примечание",
+                        text=unescape(notes),
+                    )
+                )
+                continue
 
             ferrule_type = type_text.lower()
             if is_simple and (
@@ -247,6 +282,12 @@ class ProjectSerializer:
             raise ValueError("Раздел 'connections' должен быть списком")
         for row in connections_data:
             if not isinstance(row, list):
+                continue
+            if (
+                len(row) == 1
+                and isinstance(row[0], str)
+                and row[0].startswith(ProjectSerializer._ANNOTATION_PREFIX)
+            ):
                 continue
             route_parts = [ProjectSerializer._format_connection_part(part) for part in row]
             route = " -> ".join(part for part in route_parts if part)

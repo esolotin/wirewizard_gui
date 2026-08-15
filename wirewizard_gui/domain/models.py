@@ -70,6 +70,13 @@ class FerruleModel:
 
 
 @dataclass
+class AnnotationModel:
+    title: str = "Примечание"
+    text: str = ""
+    id: str = field(default_factory=lambda: uuid4().hex)
+
+
+@dataclass
 class ProjectModel:
     schema_version: int = CURRENT_SCHEMA_VERSION
     title: str = "Новый жгут"
@@ -78,6 +85,7 @@ class ProjectModel:
     cables: list[CableModel] = field(default_factory=list)
     ferrules: list[FerruleModel] = field(default_factory=list)
     connections: list[ConnectionRowModel] = field(default_factory=list)
+    annotations: list[AnnotationModel] = field(default_factory=list)
     wireviz_extras: dict[str, Any] = field(default_factory=dict)
     wireviz_metadata_extras: dict[str, Any] = field(default_factory=dict)
 
@@ -106,6 +114,9 @@ class ProjectModel:
             cables=[CableModel(**item) for item in data.get("cables", [])],
             ferrules=[FerruleModel(**item) for item in data.get("ferrules", [])],
             connections=[ConnectionRowModel(**item) for item in data.get("connections", [])],
+            annotations=[
+                AnnotationModel(**item) for item in data.get("annotations", [])
+            ],
             wireviz_extras=data.get("wireviz_extras", {}),
             wireviz_metadata_extras=data.get("wireviz_metadata_extras", {}),
         )

@@ -27,6 +27,7 @@ class ProjectServiceTests(unittest.TestCase):
             "v2.json",
             "v3.json",
             "v4.json",
+            "v5.json",
         ):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
                 project = ProjectService.load_project(examples / filename)

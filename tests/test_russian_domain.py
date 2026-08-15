@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from wirewizard_gui.domain.models import (
+    AnnotationModel,
     CableModel,
     ConnectionRowModel,
     ConnectorModel,
@@ -15,6 +16,32 @@ from wirewizard_gui.domain.validation import IssueSeverity, ProjectValidator
 
 
 class RussianDomainTests(unittest.TestCase):
+    def test_annotations_round_trip_as_isolated_wireviz_nodes(self) -> None:
+        project = ProjectModel(
+            annotations=[
+                AnnotationModel(
+                    id="note-1",
+                    title="Монтаж <важно>",
+                    text="Экран подключить только со стороны X1.\nНе укорачивать.",
+                )
+            ]
+        )
+
+        exported = ProjectSerializer.to_wireviz_dict(project)
+        note_name = "__WW_NOTE_note-1"
+        note = exported["connectors"][note_name]
+
+        self.assertEqual(note["style"], "simple")
+        self.assertFalse(note["show_name"])
+        self.assertFalse(note["show_pincount"])
+        self.assertTrue(note["ignore_in_bom"])
+        self.assertEqual(exported["connections"], [[note_name]])
+        self.assertIn("&lt;важно&gt;", note["type"])
+
+        restored = ProjectSerializer.from_wireviz_dict(exported)
+        self.assertEqual(restored.annotations, project.annotations)
+        self.assertEqual(restored.connections, [])
+
     def test_new_models_use_russian_names(self) -> None:
         self.assertEqual(ProjectModel().title, "Новый жгут")
         self.assertEqual(ConnectorModel(name="X1").type, "Универсальный разъём")

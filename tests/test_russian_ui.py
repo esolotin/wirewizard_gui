@@ -187,6 +187,43 @@ class RussianUiTests(unittest.TestCase):
         self.assertIn("BK — чёрный\n", message)
         self.assertIn("GNYE — зелёно-жёлтый", message)
 
+    def test_annotation_can_be_added_and_edited_from_project_tree(self) -> None:
+        from wirewizard_gui.ui.main_window import MainWindow
+
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            return_value=(False, "Предпросмотр недоступен", None),
+        ):
+            window = MainWindow()
+            self._wait_for_wireviz(window)
+        try:
+            with patch(
+                "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+                return_value=(False, "Предпросмотр недоступен", None),
+            ):
+                window.add_annotation()
+                self._wait_for_wireviz(window)
+            annotations_group = window.project_tree.topLevelItem(0).child(4)
+            self.assertEqual(annotations_group.text(0), "Примечания")
+            self.assertEqual(annotations_group.childCount(), 1)
+
+            window.project_tree.setCurrentItem(annotations_group.child(0))
+            window.annotation_editor.title_edit.setText("Монтаж")
+            window.annotation_editor.text_edit.setPlainText(
+                "Экран подключить только со стороны X1."
+            )
+
+            self.assertEqual(window.project.annotations[0].title, "Монтаж")
+            self.assertEqual(annotations_group.child(0).text(0), "Монтаж")
+            self.assertEqual(
+                window.project.annotations[0].text,
+                "Экран подключить только со стороны X1.",
+            )
+            self.assertTrue(window._dirty)
+        finally:
+            with patch.object(window, "_confirm_unsaved_changes", return_value=True):
+                window.close()
+
     def test_connections_editor_preserves_arrows_and_parallel_groups(self) -> None:
         from wirewizard_gui.domain.models import (
             CableModel,

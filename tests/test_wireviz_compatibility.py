@@ -8,6 +8,7 @@ except ModuleNotFoundError:
     wireviz = None
 
 from wirewizard_gui.domain.models import (
+    AnnotationModel,
     CableModel,
     ConnectionRowModel,
     ConnectorModel,
@@ -17,6 +18,20 @@ from wirewizard_gui.domain.serializer import ProjectSerializer
 
 
 class WireVizCompatibilityTests(unittest.TestCase):
+    @unittest.skipIf(wireviz is None, "WireViz runtime dependency is not installed")
+    def test_annotation_is_a_separate_hidden_bom_free_node(self) -> None:
+        note = AnnotationModel(id="note1", title="Важно", text="Не перегибать")
+        yaml_text = ProjectSerializer.to_wireviz_yaml(ProjectModel(annotations=[note]))
+
+        harness = wireviz.parse(yaml_text, return_types="harness")
+        connector = harness.connectors["__WW_NOTE_note1"]
+
+        self.assertEqual(connector.style, "simple")
+        self.assertFalse(connector.show_name)
+        self.assertFalse(connector.show_pincount)
+        self.assertTrue(connector.ignore_in_bom)
+        self.assertIn("__WW_NOTE_note1", harness.graph.source)
+
     @unittest.skipIf(wireviz is None, "WireViz runtime dependency is not installed")
     def test_serialized_project_is_accepted_by_pinned_wireviz(self) -> None:
         project = ProjectModel(
