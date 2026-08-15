@@ -4,18 +4,17 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtGui import QAction, QColor, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from PySide6.QtWidgets import (
     QFileDialog,
     QGraphicsScene,
     QGraphicsView,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPushButton,
     QStackedLayout,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -50,23 +49,20 @@ class SvgPreviewPanel(QWidget):
         self.scene = QGraphicsScene(self)
         self.view.setScene(self.scene)
 
-        zoom_out = QPushButton("−")
-        zoom_out.setToolTip("Уменьшить")
-        zoom_in = QPushButton("+")
-        zoom_in.setToolTip("Увеличить")
-        fit = QPushButton("Вписать")
-        save_svg = QPushButton("Сохранить SVG")
-        save_png = QPushButton("Сохранить PNG")
-        zoom_out.clicked.connect(lambda: self.view.scale(1 / 1.2, 1 / 1.2))
-        zoom_in.clicked.connect(lambda: self.view.scale(1.2, 1.2))
-        fit.clicked.connect(self.fit_to_view)
-        save_svg.clicked.connect(self.save_svg)
-        save_png.clicked.connect(self.save_png)
-
-        controls = QHBoxLayout()
-        for widget in (zoom_out, zoom_in, fit, save_svg, save_png):
-            controls.addWidget(widget)
-        controls.addStretch(1)
+        controls = QToolBar("Управление схемой")
+        controls.setMovable(False)
+        actions: list[tuple[str, str, callable]] = [
+            ("−", "Уменьшить", lambda: self.view.scale(1 / 1.2, 1 / 1.2)),
+            ("+", "Увеличить", lambda: self.view.scale(1.2, 1.2)),
+            ("Вписать", "Вписать схему в окно", self.fit_to_view),
+            ("Сохранить SVG", "Сохранить схему как SVG", self.save_svg),
+            ("Сохранить PNG", "Сохранить схему как PNG", self.save_png),
+        ]
+        for text, tooltip, callback in actions:
+            action = QAction(text, controls)
+            action.setToolTip(tooltip)
+            action.triggered.connect(callback)
+            controls.addAction(action)
 
         self.stack = QStackedLayout()
         info_page = QWidget()
@@ -75,7 +71,7 @@ class SvgPreviewPanel(QWidget):
 
         svg_page = QWidget()
         svg_layout = QVBoxLayout(svg_page)
-        svg_layout.addLayout(controls)
+        svg_layout.addWidget(controls)
         svg_layout.addWidget(self.view)
 
         self.stack.addWidget(info_page)

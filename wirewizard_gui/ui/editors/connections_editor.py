@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
     QSpinBox,
     QTableWidget,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -187,14 +187,19 @@ class ConnectionsEditor(QWidget):
         )
         self.help_label.setWordWrap(True)
 
-        self.add_btn = QPushButton("Добавить строку")
-        self.duplicate_btn = QPushButton("Дублировать выбранное")
-        self.remove_btn = QPushButton("Удалить выбранное")
-        self.compact_btn = QPushButton("Убрать пропуски")
-        self.add_btn.clicked.connect(self.add_row)
-        self.duplicate_btn.clicked.connect(self.duplicate_selected)
-        self.remove_btn.clicked.connect(self.remove_selected)
-        self.compact_btn.clicked.connect(self.compact_selected)
+        controls = QToolBar("Действия со строками")
+        controls.setMovable(False)
+        self.add_btn = QAction("Добавить строку", controls)
+        self.duplicate_btn = QAction("Дублировать выбранное", controls)
+        self.remove_btn = QAction("Удалить выбранное", controls)
+        self.compact_btn = QAction("Убрать пропуски", controls)
+        self.add_btn.triggered.connect(self.add_row)
+        self.duplicate_btn.triggered.connect(self.duplicate_selected)
+        self.remove_btn.triggered.connect(self.remove_selected)
+        self.compact_btn.triggered.connect(self.compact_selected)
+        controls.addActions(
+            [self.add_btn, self.duplicate_btn, self.remove_btn, self.compact_btn]
+        )
 
         self.steps_spin = QSpinBox()
         self.steps_spin.setRange(3, self.MAX_MANUAL_STEPS)
@@ -203,17 +208,12 @@ class ConnectionsEditor(QWidget):
         self.steps_spin.setPrefix("Видимых шагов: ")
         self.steps_spin.valueChanged.connect(self._set_visible_steps)
 
-        controls = QHBoxLayout()
-        controls.addWidget(self.add_btn)
-        controls.addWidget(self.duplicate_btn)
-        controls.addWidget(self.remove_btn)
-        controls.addWidget(self.compact_btn)
-        controls.addStretch(1)
+        controls.addSeparator()
         controls.addWidget(self.steps_spin)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.help_label)
-        layout.addLayout(controls)
+        layout.addWidget(controls)
         layout.addWidget(self.table)
 
         self._rebuild_headers()

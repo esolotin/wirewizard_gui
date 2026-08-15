@@ -61,6 +61,69 @@ class RussianUiTests(unittest.TestCase):
         self.assertEqual(window.project_tree.headerItem().text(0), "Состав проекта")
         self.assertEqual(window.project.title, "Демонстрационный жгут")
 
+    def test_workspace_panels_are_movable_and_resettable(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDockWidget, QMenu
+
+        from wirewizard_gui.ui.main_window import MainWindow
+
+        with patch(
+            "wirewizard_gui.ui.main_window.WireVizService.render_svg",
+            return_value=(False, "Предпросмотр недоступен", None),
+        ):
+            window = MainWindow()
+            self._wait_for_wireviz(window)
+        self.addCleanup(window.close)
+        window.show()
+        self.app.processEvents()
+        window.resize(820, 560)
+        self.app.processEvents()
+
+        self.assertLessEqual(window.minimumSizeHint().width(), 400)
+        self.assertEqual(window.size().width(), 820)
+        self.assertEqual(window.size().height(), 560)
+
+        docks = (
+            window.project_dock,
+            window.yaml_dock,
+            window.svg_dock,
+            window.problems_dock,
+            window.results_dock,
+        )
+        for dock in docks:
+            features = dock.features()
+            self.assertTrue(features & QDockWidget.DockWidgetFeature.DockWidgetMovable)
+            self.assertTrue(features & QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+            self.assertTrue(features & QDockWidget.DockWidgetFeature.DockWidgetClosable)
+
+        window.yaml_dock.setFloating(True)
+        window.project_dock.hide()
+        window.results_dock.show()
+        window.reset_workspace_layout()
+        self.app.processEvents()
+
+        self.assertFalse(window.yaml_dock.isFloating())
+        self.assertTrue(window.project_dock.isVisible())
+        self.assertTrue(window.problems_dock.isVisible())
+        self.assertFalse(window.results_dock.isVisible())
+        self.assertEqual(
+            window.dockWidgetArea(window.project_dock),
+            Qt.DockWidgetArea.LeftDockWidgetArea,
+        )
+        self.assertEqual(
+            window.dockWidgetArea(window.yaml_dock),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        view_menu = next(
+            menu
+            for menu in window.menuBar().findChildren(QMenu)
+            if menu.title() == "Вид"
+        )
+        self.assertIn(
+            "Сбросить расположение панелей",
+            {action.text() for action in view_menu.actions()},
+        )
+
     def test_daisy_chain_wizard_uses_russian_labels(self) -> None:
         from PySide6.QtWidgets import QAbstractButton
 

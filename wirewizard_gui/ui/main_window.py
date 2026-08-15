@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
 
-from PySide6.QtCore import QEvent, QThreadPool, QTimer, Qt
+from PySide6.QtCore import QEvent, QSize, QThreadPool, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -17,14 +17,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QMessageBox,
-    QPushButton,
     QProgressBar,
-    QSplitter,
+    QScrollArea,
     QStackedWidget,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
-    QVBoxLayout,
     QWidget,
     QDialog,
 )
@@ -55,6 +53,26 @@ from wirewizard_gui.ui.panels.svg_preview import SvgPreviewPanel
 from wirewizard_gui.ui.panels.problems import ProblemsPanel
 from wirewizard_gui.ui.panels.results import ResultsPanel
 from wirewizard_gui.ui.panels.yaml_preview import YamlPreviewPanel
+
+
+class _EditorStack(QStackedWidget):
+    """Size the scrollable center from the visible editor, not the largest one."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.currentChanged.connect(lambda _index: self.updateGeometry())
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return (
+            current.minimumSizeHint()
+            if current is not None
+            else super().minimumSizeHint()
+        )
 
 
 class MainWindow(QMainWindow):
@@ -104,7 +122,7 @@ class MainWindow(QMainWindow):
         self.placeholder = QLabel("Выбери элемент в дереве слева.")
         self.placeholder.setAlignment(Qt.AlignCenter)
 
-        self.editor_stack = QStackedWidget()
+        self.editor_stack = _EditorStack()
         self.editor_stack.addWidget(self.placeholder)
         self.editor_stack.addWidget(self.project_editor)
         self.editor_stack.addWidget(self.connector_editor)
@@ -115,21 +133,21 @@ class MainWindow(QMainWindow):
         self.yaml_preview = YamlPreviewPanel()
         self.svg_preview = SvgPreviewPanel()
 
-        center = QWidget()
-        self.setCentralWidget(center)
-        layout = QVBoxLayout(center)
+        self.setDockNestingEnabled(True)
+        self.editor_scroll = QScrollArea()
+        self.editor_scroll.setWidgetResizable(True)
+        self.editor_scroll.setWidget(self.editor_stack)
+        self.setCentralWidget(self.editor_scroll)
 
-        splitter_main = QSplitter(Qt.Horizontal)
-        splitter_right = QSplitter(Qt.Vertical)
-        splitter_right.addWidget(self.yaml_preview)
-        splitter_right.addWidget(self.svg_preview)
-        splitter_right.setSizes([350, 450])
-
-        splitter_main.addWidget(self.project_tree)
-        splitter_main.addWidget(self.editor_stack)
-        splitter_main.addWidget(splitter_right)
-        splitter_main.setSizes([280, 420, 700])
-        layout.addWidget(splitter_main)
+        self.project_dock = self._create_dock(
+            "Состав проекта", "project_dock", self.project_tree
+        )
+        self.yaml_dock = self._create_dock(
+            "WireViz YAML", "yaml_preview_dock", self.yaml_preview
+        )
+        self.svg_dock = self._create_dock(
+            "Предпросмотр схемы", "svg_preview_dock", self.svg_preview
+        )
 
         self.problems_panel = ProblemsPanel()
         self.problems_panel.issue_activated.connect(self._navigate_to_issue)
@@ -142,8 +160,7 @@ class MainWindow(QMainWindow):
         self.results_dock = QDockWidget("Результаты WireViz", self)
         self.results_dock.setObjectName("results_dock")
         self.results_dock.setWidget(self.results_panel)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.results_dock)
-        self.results_dock.hide()
+        self._apply_default_workspace_layout()
 
         self.render_progress = QProgressBar()
         self.render_progress.setRange(0, 0)
@@ -168,9 +185,11 @@ class MainWindow(QMainWindow):
         self._update_dirty_state()
 
     def _build_toolbar(self) -> None:
-        toolbar = QToolBar("Основная панель")
-        toolbar.setObjectName("main_toolbar")
-        self.addToolBar(toolbar)
+        self.main_toolbar = QToolBar("Основная панель")
+        self.main_toolbar.setObjectName("main_toolbar")
+        self.main_toolbar.setMovable(True)
+        self.main_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.addToolBar(self.main_toolbar)
 
         buttons: list[tuple[str, callable]] = [
             ("Отменить", self.undo_stack.undo),
@@ -186,12 +205,11 @@ class MainWindow(QMainWindow):
             ("Библиотека компонентов", self.open_component_library),
             ("Обновить предпросмотр", self.refresh_preview),
         ]
-        self.toolbar_buttons: dict[str, QPushButton] = {}
+        self.toolbar_buttons: dict[str, QAction] = {}
         for text, callback in buttons:
-            btn = QPushButton(text)
-            btn.clicked.connect(callback)
-            toolbar.addWidget(btn)
-            self.toolbar_buttons[text] = btn
+            action = self.main_toolbar.addAction(text)
+            action.triggered.connect(callback)
+            self.toolbar_buttons[text] = action
         self.toolbar_buttons["Отменить"].setEnabled(False)
         self.toolbar_buttons["Повторить"].setEnabled(False)
         self.undo_stack.canUndoChanged.connect(
@@ -205,6 +223,79 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("Файл")
         self.recent_menu = file_menu.addMenu("Недавние проекты")
         self._refresh_recent_menu()
+
+        view_menu = self.menuBar().addMenu("Вид")
+        for dock in (
+            self.project_dock,
+            self.yaml_dock,
+            self.svg_dock,
+            self.problems_dock,
+            self.results_dock,
+        ):
+            view_menu.addAction(dock.toggleViewAction())
+        view_menu.addSeparator()
+        view_menu.addAction(self.main_toolbar.toggleViewAction())
+        view_menu.addSeparator()
+        reset_action = view_menu.addAction("Сбросить расположение панелей")
+        reset_action.triggered.connect(self.reset_workspace_layout)
+
+    def _create_dock(self, title: str, object_name: str, widget: QWidget) -> QDockWidget:
+        dock = QDockWidget(title, self)
+        dock.setObjectName(object_name)
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        dock.setWidget(widget)
+        return dock
+
+    def _apply_default_workspace_layout(self) -> None:
+        docks = (
+            self.project_dock,
+            self.yaml_dock,
+            self.svg_dock,
+            self.problems_dock,
+            self.results_dock,
+        )
+        for dock in docks:
+            dock.setFloating(False)
+            self.removeDockWidget(dock)
+
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.yaml_dock)
+        self.splitDockWidget(
+            self.yaml_dock, self.svg_dock, Qt.Orientation.Vertical
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.problems_dock)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.results_dock)
+        self.tabifyDockWidget(self.problems_dock, self.results_dock)
+
+        self.project_dock.show()
+        self.yaml_dock.show()
+        self.svg_dock.show()
+        self.problems_dock.show()
+        self.results_dock.hide()
+        self.resizeDocks(
+            [self.project_dock, self.yaml_dock],
+            [220, 420],
+            Qt.Orientation.Horizontal,
+        )
+        self.resizeDocks(
+            [self.yaml_dock, self.svg_dock],
+            [300, 500],
+            Qt.Orientation.Vertical,
+        )
+        self.resizeDocks(
+            [self.problems_dock], [170], Qt.Orientation.Vertical
+        )
+
+    def reset_workspace_layout(self) -> None:
+        self._apply_default_workspace_layout()
+        self.main_toolbar.show()
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.main_toolbar)
+        self.statusBar().showMessage("Расположение панелей сброшено", 3000)
 
     def _refresh_recent_menu(self) -> None:
         self.recent_menu.clear()
