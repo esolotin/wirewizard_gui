@@ -26,6 +26,7 @@ class ConnectorModel:
     supplier: str = ""
     spn: str = ""
     ignore_in_bom: bool = False
+    wireviz_extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -48,6 +49,7 @@ class CableModel:
     supplier: str = ""
     spn: str = ""
     ignore_in_bom: bool = False
+    wireviz_extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -64,6 +66,7 @@ class FerruleModel:
     supplier: str = ""
     spn: str = ""
     ignore_in_bom: bool = False
+    wireviz_extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -75,6 +78,8 @@ class ProjectModel:
     cables: list[CableModel] = field(default_factory=list)
     ferrules: list[FerruleModel] = field(default_factory=list)
     connections: list[ConnectionRowModel] = field(default_factory=list)
+    wireviz_extras: dict[str, Any] = field(default_factory=dict)
+    wireviz_metadata_extras: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         self.resolve_connection_ids()
@@ -101,4 +106,6 @@ class ProjectModel:
             cables=[CableModel(**item) for item in data.get("cables", [])],
             ferrules=[FerruleModel(**item) for item in data.get("ferrules", [])],
             connections=[ConnectionRowModel(**item) for item in data.get("connections", [])],
+            wireviz_extras=data.get("wireviz_extras", {}),
+            wireviz_metadata_extras=data.get("wireviz_metadata_extras", {}),
         )

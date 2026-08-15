@@ -12,6 +12,7 @@ from wirewizard_gui.domain.project_format import (
     CURRENT_SCHEMA_VERSION,
     ProjectFormatError,
 )
+from wirewizard_gui.domain.serializer import ProjectSerializer
 from wirewizard_gui.services import project_service
 from wirewizard_gui.services.project_service import ProjectService
 
@@ -25,6 +26,7 @@ class ProjectServiceTests(unittest.TestCase):
             "v1.json",
             "v2.json",
             "v3.json",
+            "v4.json",
         ):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
                 project = ProjectService.load_project(examples / filename)
@@ -36,6 +38,50 @@ class ProjectServiceTests(unittest.TestCase):
 
                 self.assertEqual(payload["schema_version"], CURRENT_SCHEMA_VERSION)
                 self.assertEqual(ProjectService.load_project(saved), project)
+
+    def test_unknown_wireviz_fields_survive_yaml_json_yaml_round_trip(self) -> None:
+        source = """\
+metadata:
+  title: Расширенный проект
+  author: Конструктор
+options:
+  fontname: Arial
+  bgcolor: '#ffffff'
+connectors:
+  X1:
+    type: Custom
+    pincount: 2
+    image:
+      src: connector.png
+      width: 120
+cables:
+  W1:
+    wirecount: 2
+    custom_property: [one, two]
+connections:
+  - - {X1: 1}
+    - {W1: 1}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            imported = ProjectSerializer.from_wireviz_yaml(source)
+            project_path = root / "project.json"
+            ProjectService.save_project(project_path, imported)
+
+            restored = ProjectService.load_project(project_path)
+            exported = ProjectSerializer.to_wireviz_dict(restored)
+
+            self.assertEqual(exported["metadata"]["author"], "Конструктор")
+            self.assertEqual(
+                exported["options"], {"fontname": "Arial", "bgcolor": "#ffffff"}
+            )
+            self.assertEqual(
+                exported["connectors"]["X1"]["image"],
+                {"src": "connector.png", "width": 120},
+            )
+            self.assertEqual(
+                exported["cables"]["W1"]["custom_property"], ["one", "two"]
+            )
 
     def test_v1_routes_migrate_to_structured_steps_without_loss(self) -> None:
         path = (

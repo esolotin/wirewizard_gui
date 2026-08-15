@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Any
 import re
 
@@ -16,12 +17,25 @@ from wirewizard_gui.domain.models import (
 
 
 class ProjectSerializer:
+    _TOP_LEVEL_KEYS = {"metadata", "connectors", "cables", "connections"}
+    _METADATA_KEYS = {"title", "description"}
+    _CONNECTOR_KEYS = {
+        "type", "subtype", "style", "pincount", "pins", "pinlabels", "pinout",
+        "color", "notes", "pn", "manufacturer", "mpn", "supplier", "spn",
+        "ignore_in_bom",
+    }
+    _CABLE_KEYS = {
+        "type", "gauge", "length", "wirecount", "category", "color_code",
+        "colors", "wirelabels", "shield", "notes", "pn", "manufacturer", "mpn",
+        "supplier", "spn", "ignore_in_bom",
+    }
+
     @staticmethod
     def to_wireviz_dict(project: ProjectModel) -> dict:
-        data: dict[str, Any] = OrderedDict()
+        data: dict[str, Any] = OrderedDict(deepcopy(project.wireviz_extras))
 
-        if project.title or project.description:
-            metadata = OrderedDict()
+        if project.title or project.description or project.wireviz_metadata_extras:
+            metadata = OrderedDict(deepcopy(project.wireviz_metadata_extras))
             if project.title:
                 metadata["title"] = project.title
             if project.description:
@@ -30,7 +44,7 @@ class ProjectSerializer:
 
         connectors = OrderedDict()
         for item in project.connectors:
-            entry = OrderedDict()
+            entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
             if item.subtype:
                 entry["subtype"] = item.subtype
@@ -50,7 +64,7 @@ class ProjectSerializer:
             connectors[item.name] = entry
 
         for item in project.ferrules:
-            entry = OrderedDict()
+            entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
             if item.subtype:
                 entry["subtype"] = item.subtype
@@ -67,7 +81,7 @@ class ProjectSerializer:
 
         cables = OrderedDict()
         for item in project.cables:
-            entry = OrderedDict()
+            entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
             entry["gauge"] = ProjectSerializer._serialize_gauge(item.gauge)
             entry["length"] = ProjectSerializer._serialize_length(item.length)
@@ -127,7 +141,20 @@ class ProjectSerializer:
         title = metadata.get("title", "Импортированный жгут") if isinstance(metadata, dict) else "Импортированный жгут"
         description = metadata.get("description", "") if isinstance(metadata, dict) else ""
 
-        project = ProjectModel(title=title, description=description)
+        project = ProjectModel(
+            title=title,
+            description=description,
+            wireviz_extras=ProjectSerializer._unknown_fields(
+                data, ProjectSerializer._TOP_LEVEL_KEYS
+            ),
+            wireviz_metadata_extras=(
+                ProjectSerializer._unknown_fields(
+                    metadata, ProjectSerializer._METADATA_KEYS
+                )
+                if isinstance(metadata, dict)
+                else {}
+            ),
+        )
 
         connectors_data = data.get("connectors") or {}
         if not isinstance(connectors_data, dict):
@@ -158,6 +185,9 @@ class ProjectSerializer:
                         subtype=subtype or "0.5 mm²",
                         color=color,
                         notes=notes,
+                        wireviz_extras=ProjectSerializer._unknown_fields(
+                            entry, ProjectSerializer._CONNECTOR_KEYS
+                        ),
                         **ProjectSerializer._read_bom_fields(entry),
                     )
                 )
@@ -174,6 +204,9 @@ class ProjectSerializer:
                         notes=notes,
                         color=color,
                         simple=is_simple,
+                        wireviz_extras=ProjectSerializer._unknown_fields(
+                            entry, ProjectSerializer._CONNECTOR_KEYS
+                        ),
                         **ProjectSerializer._read_bom_fields(entry),
                     )
                 )
@@ -202,6 +235,9 @@ class ProjectSerializer:
                     shield=bool(entry.get("shield", False)),
                     bundle=str(entry.get("category", "")).lower() == "bundle",
                     notes=str(entry.get("notes", "") or ""),
+                    wireviz_extras=ProjectSerializer._unknown_fields(
+                        entry, ProjectSerializer._CABLE_KEYS
+                    ),
                     **ProjectSerializer._read_bom_fields(entry),
                 )
             )
@@ -218,6 +254,16 @@ class ProjectSerializer:
                 project.connections.append(ConnectionRowModel(route=route))
 
         return project
+
+    @staticmethod
+    def _unknown_fields(
+        data: dict[str, Any], known_keys: set[str]
+    ) -> dict[str, Any]:
+        return {
+            key: deepcopy(value)
+            for key, value in data.items()
+            if key not in known_keys
+        }
 
     @staticmethod
     def _add_bom_fields(entry: dict[str, Any], item: object) -> None:

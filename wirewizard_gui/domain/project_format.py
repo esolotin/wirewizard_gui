@@ -6,7 +6,7 @@ from typing import Any, Callable
 from uuid import NAMESPACE_URL, uuid5
 
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 class ProjectFormatError(ValueError):
@@ -54,6 +54,17 @@ def _migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _migrate_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
+    data.setdefault("wireviz_extras", {})
+    data.setdefault("wireviz_metadata_extras", {})
+    for group in ("connectors", "cables", "ferrules"):
+        for item in data.get(group, []) or []:
+            if isinstance(item, dict):
+                item.setdefault("wireviz_extras", {})
+    data["schema_version"] = 4
+    return data
+
+
 def _assign_step_ids(step, component_ids: dict[str, str]) -> None:
     if step.kind == "component":
         step.component_id = component_ids.get(step.component.split(".", 1)[0])
@@ -65,6 +76,7 @@ _MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
     0: _migrate_v0_to_v1,
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
+    3: _migrate_v3_to_v4,
 }
 
 

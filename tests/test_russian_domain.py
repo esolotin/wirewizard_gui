@@ -156,6 +156,22 @@ class RussianDomainTests(unittest.TestCase):
         self.assertTrue(restored.cables[0].ignore_in_bom)
         self.assertEqual(restored.ferrules[0].manufacturer, "Phoenix Contact")
 
+    def test_supported_edits_override_preserved_wireviz_extras(self) -> None:
+        project = ConnectorModel(
+            name="X1",
+            type="Новый тип",
+            wireviz_extras={"type": "Старый тип", "custom": {"nested": True}},
+        )
+
+        exported = ProjectSerializer.to_wireviz_dict(
+            ProjectModel(connectors=[project])
+        )
+
+        self.assertEqual(exported["connectors"]["X1"]["type"], "Новый тип")
+        self.assertEqual(
+            exported["connectors"]["X1"]["custom"], {"nested": True}
+        )
+
 
     def test_validator_rejects_invalid_arrows_and_group_sizes(self) -> None:
         project = ProjectModel(
