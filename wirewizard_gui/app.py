@@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     # ready. This is important for windowed builds that have no console.
     from PySide6.QtWidgets import QApplication, QMessageBox
 
+    from wirewizard_gui.services.session_service import SessionService
     from wirewizard_gui.ui.main_window import MainWindow
 
     app = QApplication(sys.argv if argv is None else argv)
@@ -34,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         QMessageBox.critical(None, title, message)
 
     install_exception_handler(show_exception)
-    window = MainWindow()
+    window = MainWindow(session_service=SessionService())
     window.show()
     logger.info("Runtime log: %s", log_path)
     return app.exec()

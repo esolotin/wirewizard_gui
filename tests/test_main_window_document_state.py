@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 import os
+from pathlib import Path
+import tempfile
 import threading
 import time
 from types import SimpleNamespace
@@ -42,6 +44,79 @@ class MainWindowDocumentStateTests(unittest.TestCase):
         self.addCleanup(self._close_without_prompt, window)
         self._wait_for_wireviz(window)
         return window
+
+    def _make_session_window(self, service):
+        from wirewizard_gui.ui.main_window import MainWindow
+
+        window = MainWindow(session_service=service)
+        self.addCleanup(self._close_without_prompt, window)
+        self._wait_for_wireviz(window)
+        return window
+
+    def test_recovery_is_offered_and_restored_as_unsaved_work(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from wirewizard_gui.domain.models import ProjectModel
+        from wirewizard_gui.services.session_service import SessionService
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = SessionService(tmp)
+            original_path = str(Path(tmp) / "original.json")
+            service.save_recovery(ProjectModel(title="Восстановленный проект"), original_path)
+
+            with patch.object(
+                QMessageBox,
+                "question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                window = self._make_session_window(service)
+
+            self.assertEqual(window.project.title, "Восстановленный проект")
+            self.assertEqual(window.current_path, original_path)
+            self.assertTrue(window._dirty)
+            self.assertTrue(window.windowTitle().endswith(" *"))
+
+    def test_session_tracks_recent_json_and_saves_layout_on_close(self) -> None:
+        from wirewizard_gui.domain.models import ProjectModel
+        from wirewizard_gui.services.project_service import ProjectService
+        from wirewizard_gui.services.session_service import SessionService
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_path = root / "recent.json"
+            ProjectService.save_project(project_path, ProjectModel(title="Недавний"))
+            service = SessionService(root / "session")
+            window = self._make_session_window(service)
+
+            window._open_project_path(str(project_path))
+
+            self.assertEqual(service.recent_projects(), [str(project_path.resolve())])
+            self.assertEqual(window.recent_menu.actions()[0].text(), str(project_path.resolve()))
+            window.resize(1111, 777)
+            window.close()
+            geometry, state = service.load_layout()
+            self.assertTrue(geometry)
+            self.assertTrue(state)
+
+    def test_dirty_edit_automatically_writes_and_clean_save_removes_recovery(self) -> None:
+        from wirewizard_gui.services.session_service import SessionService
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = SessionService(tmp)
+            window = self._make_session_window(service)
+            self._make_dirty(window)
+            deadline = time.monotonic() + 2.0
+            while not service.recovery_path.exists() and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+
+            self.assertTrue(service.recovery_path.exists())
+            with patch(
+                "wirewizard_gui.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(Path(tmp) / "saved.json"), ""),
+            ):
+                self.assertTrue(window.save_project_as())
+            self.assertFalse(service.recovery_path.exists())
 
     def _wait_for_wireviz(self, window, timeout: float = 3.0) -> None:
         deadline = time.monotonic() + timeout

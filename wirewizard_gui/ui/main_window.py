@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
 
-from PySide6.QtCore import QThreadPool, Qt
+from PySide6.QtCore import QThreadPool, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -38,6 +38,7 @@ from wirewizard_gui.domain.references import ProjectReferences
 from wirewizard_gui.domain.serializer import ProjectSerializer
 from wirewizard_gui.domain.validation import IssueSeverity, ProjectValidator, ValidationIssue
 from wirewizard_gui.services.project_service import ProjectService
+from wirewizard_gui.services.session_service import SessionService
 from wirewizard_gui.services.wireviz_service import WireVizService
 from wirewizard_gui.services.wireviz_tasks import WireVizTask
 from wirewizard_gui.ui.dialogs.daisy_chain_wizard import BulkWiringWizard
@@ -54,9 +55,10 @@ from wirewizard_gui.ui.panels.yaml_preview import YamlPreviewPanel
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, session_service: SessionService | None = None) -> None:
         super().__init__()
         self.resize(1450, 850)
+        self.session_service = session_service
 
         self.project = self._create_demo_project()
         self.current_path: str | None = None
@@ -75,6 +77,10 @@ class MainWindow(QMainWindow):
         self._preview_warning_counts: dict[int, int] = {}
         self._wireviz_pool = QThreadPool(self)
         self._wireviz_pool.setMaxThreadCount(1)
+        self._recovery_timer = QTimer(self)
+        self._recovery_timer.setSingleShot(True)
+        self._recovery_timer.setInterval(500)
+        self._recovery_timer.timeout.connect(self._write_recovery)
 
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Состав проекта"])
@@ -141,15 +147,19 @@ class MainWindow(QMainWindow):
 
         self._connect_editor_change_signals()
         self._build_toolbar()
+        self._build_menu()
         self._build_shortcuts()
+        self._restore_layout()
+        recovery_loaded = self._offer_recovery()
         self._refresh_tree()
         self.refresh_preview()
-        self._clean_state = self.project.to_dict()
+        self._clean_state = None if recovery_loaded else self.project.to_dict()
         self._change_tracking_depth = 0
         self._update_dirty_state()
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Основная панель")
+        toolbar.setObjectName("main_toolbar")
         self.addToolBar(toolbar)
 
         buttons: list[tuple[str, callable]] = [
@@ -179,6 +189,79 @@ class MainWindow(QMainWindow):
         self.undo_stack.canRedoChanged.connect(
             self.toolbar_buttons["Повторить"].setEnabled
         )
+
+    def _build_menu(self) -> None:
+        file_menu = self.menuBar().addMenu("Файл")
+        self.recent_menu = file_menu.addMenu("Недавние проекты")
+        self._refresh_recent_menu()
+
+    def _refresh_recent_menu(self) -> None:
+        self.recent_menu.clear()
+        paths = self.session_service.recent_projects() if self.session_service else []
+        if not paths:
+            action = self.recent_menu.addAction("Нет недавних проектов")
+            action.setEnabled(False)
+            return
+        for path in paths:
+            action = self.recent_menu.addAction(path)
+            action.triggered.connect(
+                lambda _checked=False, selected_path=path: self._open_project_path(selected_path)
+            )
+
+    def _remember_recent_project(self, path: str) -> None:
+        if self.session_service is None:
+            return
+        self.session_service.add_recent_project(path)
+        self._refresh_recent_menu()
+
+    def _restore_layout(self) -> None:
+        if self.session_service is None:
+            return
+        geometry, state = self.session_service.load_layout()
+        if geometry:
+            self.restoreGeometry(geometry)
+        if state:
+            self.restoreState(state)
+
+    def _offer_recovery(self) -> bool:
+        if self.session_service is None or not self.session_service.recovery_path.is_file():
+            return False
+        answer = QMessageBox.question(
+            self,
+            "Восстановление проекта",
+            "Найдена аварийная копия несохранённого проекта. Восстановить её?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.session_service.clear_recovery()
+            return False
+        try:
+            project, original_path = self.session_service.load_recovery()
+        except Exception as exc:
+            QMessageBox.warning(self, "Восстановление проекта", str(exc))
+            self.session_service.clear_recovery()
+            return False
+        self.project = project
+        self.current_path = original_path
+        self.current_path_kind = "json"
+        return True
+
+    def _write_recovery(self) -> None:
+        if self.session_service is None or not self._dirty:
+            return
+        try:
+            recovery_project = deepcopy(self.project)
+            if self._current_reference_item is not None:
+                item, previous_name = self._current_reference_item
+                current_name = str(getattr(item, "name", "")).strip()
+                if current_name != previous_name:
+                    ProjectReferences.rename_component(
+                        recovery_project, previous_name, current_name
+                    )
+            self.session_service.save_recovery(recovery_project, self.current_path)
+        except Exception as exc:
+            self.statusBar().showMessage(f"Не удалось сохранить аварийную копию: {exc}", 6000)
 
     def _build_shortcuts(self) -> None:
         shortcuts = [
@@ -438,6 +521,12 @@ class MainWindow(QMainWindow):
             self._dirty = dirty
             self.setWindowModified(dirty)
         self._update_window_title()
+        if self.session_service is not None and not self._change_tracking_depth:
+            if dirty:
+                self._recovery_timer.start()
+            else:
+                self._recovery_timer.stop()
+                self.session_service.clear_recovery()
 
     def _update_window_title(self) -> None:
         document_name = Path(self.current_path).name if self.current_path else self.project.title.strip()
@@ -650,14 +739,22 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._open_project_path(path)
+
+    def _open_project_path(self, path: str) -> None:
         if not self._confirm_unsaved_changes("открыть другой проект"):
             return
         try:
             project = ProjectService.load_project(path)
             is_json = Path(path).suffix.lower() == ".json"
             self._install_project(project, path if is_json else None, dirty=not is_json)
+            if is_json:
+                self._remember_recent_project(path)
             self.statusBar().showMessage(f"Открыт файл: {path}", 4000)
         except Exception as exc:
+            if self.session_service is not None and not Path(path).is_file():
+                self.session_service.remove_recent_project(path)
+                self._refresh_recent_menu()
             QMessageBox.critical(self, "Открытие проекта", str(exc))
 
     def import_yaml(self) -> None:
@@ -684,6 +781,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Сохранение проекта", str(exc))
             return False
         self._mark_clean()
+        self._remember_recent_project(path)
         self.statusBar().showMessage(f"Проект сохранён: {path}", 4000)
         self._refresh_tree()
         return True
@@ -706,6 +804,7 @@ class MainWindow(QMainWindow):
         self.current_path = path
         self.current_path_kind = "json"
         self._mark_clean()
+        self._remember_recent_project(path)
         self.statusBar().showMessage(f"Проект сохранён: {path}", 4000)
         self._refresh_tree()
         return True
@@ -1063,6 +1162,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._confirm_unsaved_changes("закрыть приложение"):
+            self._recovery_timer.stop()
+            if self.session_service is not None:
+                self.session_service.save_layout(self.saveGeometry(), self.saveState())
+                self.session_service.clear_recovery()
             self._wireviz_pool.clear()
             self._wireviz_pool.waitForDone(5000)
             event.accept()
