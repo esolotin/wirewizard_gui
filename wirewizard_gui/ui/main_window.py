@@ -6,13 +6,15 @@ from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
 
-from PySide6.QtCore import QThreadPool, QTimer, Qt
+from PySide6.QtCore import QEvent, QThreadPool, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QDockWidget,
+    QApplication,
     QFileDialog,
     QLabel,
     QMainWindow,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -82,6 +84,10 @@ class MainWindow(QMainWindow):
         self._recovery_timer.setSingleShot(True)
         self._recovery_timer.setInterval(500)
         self._recovery_timer.timeout.connect(self._write_recovery)
+        self._auto_preview_timer = QTimer(self)
+        self._auto_preview_timer.setSingleShot(True)
+        self._auto_preview_timer.setInterval(700)
+        self._auto_preview_timer.timeout.connect(self._run_auto_preview)
 
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Состав проекта"])
@@ -147,6 +153,9 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.render_progress)
 
         self._connect_editor_change_signals()
+        application = QApplication.instance()
+        if application is not None:
+            application.installEventFilter(self)
         self._build_toolbar()
         self._build_menu()
         self._build_shortcuts()
@@ -309,6 +318,7 @@ class MainWindow(QMainWindow):
         ]
         for editor in line_edits:
             editor.textChanged.connect(self._on_editor_content_changed)
+            editor.editingFinished.connect(self._flush_auto_preview)
 
         plain_text_edits = [
             self.project_editor.description_edit,
@@ -333,9 +343,14 @@ class MainWindow(QMainWindow):
         ]
         for combo_box in combo_boxes:
             combo_box.currentTextChanged.connect(self._on_editor_content_changed)
+            combo_box.activated.connect(self._flush_auto_preview)
+            if combo_box.lineEdit() is not None:
+                combo_box.lineEdit().editingFinished.connect(self._flush_auto_preview)
 
         self.connector_editor.pincount_spin.valueChanged.connect(self._on_editor_content_changed)
         self.cable_editor.wirecount_spin.valueChanged.connect(self._on_editor_content_changed)
+        self.connector_editor.pincount_spin.editingFinished.connect(self._flush_auto_preview)
+        self.cable_editor.wirecount_spin.editingFinished.connect(self._flush_auto_preview)
         self.connector_editor.simple_check.toggled.connect(self._on_editor_content_changed)
         self.cable_editor.shield_check.toggled.connect(self._on_editor_content_changed)
         self.cable_editor.bundle_check.toggled.connect(self._on_editor_content_changed)
@@ -348,6 +363,15 @@ class MainWindow(QMainWindow):
         self.ferrule_editor.ignore_in_bom_check.toggled.connect(
             self._on_editor_content_changed
         )
+        for check_box in (
+            self.connector_editor.simple_check,
+            self.cable_editor.shield_check,
+            self.cable_editor.bundle_check,
+            self.connector_editor.ignore_in_bom_check,
+            self.cable_editor.ignore_in_bom_check,
+            self.ferrule_editor.ignore_in_bom_check,
+        ):
+            check_box.clicked.connect(self._flush_auto_preview)
         self.connections_editor.content_changed.connect(self._on_editor_content_changed)
         self.connector_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)
         self.cable_editor.name_edit.editingFinished.connect(self._commit_current_component_rename)
@@ -428,6 +452,7 @@ class MainWindow(QMainWindow):
     def _on_editor_content_changed(self, *_args) -> None:
         if self._change_tracking_depth:
             return
+        self._auto_preview_timer.start()
         before = self.project.to_dict()
         self._editor_pending = True
         self._save_current_editor(finalize_name=False)
@@ -441,6 +466,33 @@ class MainWindow(QMainWindow):
                 self._pending_rename_before = before
             return
         self._record_project_change(before, "Изменение поля")
+
+    def _flush_auto_preview(self, *_args) -> None:
+        if not self._auto_preview_timer.isActive():
+            return
+        self._auto_preview_timer.stop()
+        self._run_auto_preview()
+
+    def _run_auto_preview(self) -> None:
+        if self._change_tracking_depth:
+            return
+        self.refresh_preview(refresh_tree=False)
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            self._auto_preview_timer.isActive()
+            and isinstance(watched, QWidget)
+            and self.editor_stack.isAncestorOf(watched)
+        ):
+            if event.type() == QEvent.Type.FocusOut:
+                QTimer.singleShot(0, self._flush_auto_preview)
+            elif (
+                event.type() == QEvent.Type.KeyPress
+                and isinstance(watched, QLineEdit)
+                and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
+            ):
+                QTimer.singleShot(0, self._flush_auto_preview)
+        return super().eventFilter(watched, event)
 
     def _save_current_editor(self, *, finalize_name: bool = True) -> None:
         if self._editor_pending:
@@ -1079,9 +1131,18 @@ class MainWindow(QMainWindow):
         dialog.exec()
         return dialog.clickedButton() is delete_button
 
-    def refresh_preview(self) -> None:
+    def refresh_preview(self, *, refresh_tree: bool = True) -> None:
+        self._auto_preview_timer.stop()
         self._save_current_editor()
-        self._refresh_tree()
+        if refresh_tree:
+            self._refresh_tree()
+        else:
+            root = self.project_tree.topLevelItem(0)
+            if root is not None:
+                root.setText(0, self.project.title)
+            self.connections_editor.set_component_sources(
+                self.project.connectors, self.project.cables, self.project.ferrules
+            )
         request_id = self._next_wireviz_request_id()
         self._latest_preview_id = request_id
 
@@ -1196,7 +1257,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._confirm_unsaved_changes("закрыть приложение"):
+            self._auto_preview_timer.stop()
             self._recovery_timer.stop()
+            application = QApplication.instance()
+            if application is not None:
+                application.removeEventFilter(self)
             if self.session_service is not None:
                 self.session_service.save_layout(self.saveGeometry(), self.saveState())
                 self.session_service.clear_recovery()

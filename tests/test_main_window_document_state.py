@@ -159,6 +159,35 @@ class MainWindowDocumentStateTests(unittest.TestCase):
         self.assertFalse(window.isWindowModified())
         self.assertNotIn("*", window.windowTitle())
 
+    def test_auto_preview_debounces_typing_and_flushes_on_editing_finished(self) -> None:
+        window = self._make_window()
+        self._select_project(window)
+
+        with patch.object(window, "refresh_preview") as refresh:
+            window.project_editor.title_edit.setText("Первый вариант")
+            window.project_editor.title_edit.setText("Итоговый вариант")
+            self.assertTrue(window._auto_preview_timer.isActive())
+            refresh.assert_not_called()
+
+            window.project_editor.title_edit.editingFinished.emit()
+
+            refresh.assert_called_once_with(refresh_tree=False)
+            self.assertFalse(window._auto_preview_timer.isActive())
+
+    def test_auto_preview_after_pause_runs_once_without_rebuilding_tree(self) -> None:
+        window = self._make_window()
+        self._select_project(window)
+
+        with patch.object(window, "refresh_preview") as refresh:
+            window.project_editor.title_edit.setText("А")
+            window.project_editor.title_edit.setText("Автообновление")
+            deadline = time.monotonic() + 2.0
+            while refresh.call_count == 0 and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+
+            refresh.assert_called_once_with(refresh_tree=False)
+
     def test_selection_refresh_and_presentation_changes_do_not_set_dirty(self) -> None:
         window = self._make_window()
         original = window.project.to_dict()
