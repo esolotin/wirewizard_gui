@@ -1,3 +1,7 @@
+#if Ver < 0x06030000
+  #error Inno Setup 6.3 or newer is required
+#endif
+
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
 #endif
