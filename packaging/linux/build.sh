@@ -393,6 +393,12 @@ stage_system_graphviz() {
         done < <(dpkg-query -L "${package}")
     done
 
+    # Ubuntu packages /usr/bin/dot as a symlink to a helper in /usr/sbin.
+    # Store the resolved executable at the portable path so that the bundle
+    # does not depend on that host-only symlink target.
+    mkdir -p -- "${destination}/bin"
+    cp -aL --remove-destination -- "${dot_path}" "${destination}/bin/dot"
+
     # Some Graphviz versions generate configN* during package setup, so
     # those files are present at runtime but absent from dpkg-query -L.
     for plugin_dir in /usr/lib/graphviz /usr/lib/*/graphviz; do

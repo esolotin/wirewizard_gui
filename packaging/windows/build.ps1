@@ -40,7 +40,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $oldPath = $env:PATH
 try {
-    if (-not $SkipInstaller -and $null -eq (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue)) {
+    if (-not $SkipInstaller) {
         $programFilesRoots = @(
             [Environment]::GetEnvironmentVariable("ProgramFiles(x86)"),
             [Environment]::GetEnvironmentVariable("ProgramFiles")
@@ -58,6 +58,12 @@ try {
             }
             if ($null -ne $compiler) {
                 break
+            }
+        }
+        if ($null -eq $compiler) {
+            $compilerCommand = Get-Command "ISCC.exe" -CommandType Application -ErrorAction SilentlyContinue
+            if ($null -ne $compilerCommand) {
+                $compiler = $compilerCommand.Path
             }
         }
 
@@ -80,6 +86,7 @@ try {
         if ($innoVersion -lt [Version]"6.3") {
             throw "WireWizardGUI build: Inno Setup $innoVersion is too old; version 6.3 or newer is required."
         }
+        Write-Host "Using Inno Setup $innoVersion from '$resolvedCompiler'."
     }
 
     $implementationParameters = @{
