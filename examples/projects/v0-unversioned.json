@@ -1,0 +1,13 @@
+{
+  "title": "Пример проекта старого формата",
+  "description": "Файл без schema_version: формат v0.",
+  "connectors": [
+    {
+      "name": "X1",
+      "pincount": 2
+    }
+  ],
+  "cables": [],
+  "ferrules": [],
+  "connections": []
+}

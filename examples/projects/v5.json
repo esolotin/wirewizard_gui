@@ -1,0 +1,18 @@
+{
+  "schema_version": 5,
+  "title": "Проект v5 с примечанием",
+  "description": "Пример текущего формата.",
+  "connectors": [],
+  "cables": [],
+  "ferrules": [],
+  "connections": [],
+  "annotations": [
+    {
+      "title": "Монтаж",
+      "text": "Экран подключить только со стороны X1.",
+      "id": "example-note"
+    }
+  ],
+  "wireviz_extras": {},
+  "wireviz_metadata_extras": {}
+}

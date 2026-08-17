@@ -1,0 +1,29 @@
+{
+  "schema_version": 4,
+  "title": "Пример проекта формата v4",
+  "description": "Неизвестные поля WireViz сохраняются вместе с проектом.",
+  "connectors": [
+    {
+      "name": "X1",
+      "id": "e44c3c44d1774d76ba841cda9ece84cb",
+      "pincount": 2,
+      "wireviz_extras": {
+        "image": {
+          "src": "connector.png",
+          "width": 120
+        }
+      }
+    }
+  ],
+  "cables": [],
+  "ferrules": [],
+  "connections": [],
+  "wireviz_extras": {
+    "options": {
+      "fontname": "Arial"
+    }
+  },
+  "wireviz_metadata_extras": {
+    "author": "WireWizardGUI"
+  }
+}

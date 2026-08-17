@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
     QSpinBox,
     QTableWidget,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -26,14 +26,25 @@ class _PartModel:
 
 
 class _RouteCell(QWidget):
+    content_changed = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._suppress_content_changed = False
         self.component_combo = QComboBox()
         self.component_combo.setEditable(True)
+        self.component_combo.setToolTip(
+            "Выберите компонент. Список автоматически ограничен допустимым следующим шагом."
+        )
+        if self.component_combo.lineEdit() is not None:
+            self.component_combo.lineEdit().setPlaceholderText("Компонент или стрелка")
         self.value_combo = QComboBox()
         self.value_combo.setEditable(True)
         self.value_combo.setInsertPolicy(QComboBox.NoInsert)
         self.value_combo.setMinimumContentsLength(8)
+        self.value_combo.setToolTip("Номер или метка контакта/жилы; s означает экран кабеля.")
+        if self.value_combo.lineEdit() is not None:
+            self.value_combo.lineEdit().setPlaceholderText("Контакт / жила")
 
         layout = QGridLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -43,23 +54,34 @@ class _RouteCell(QWidget):
         layout.setColumnStretch(1, 2)
 
         self.component_combo.currentTextChanged.connect(self._component_changed)
+        self.value_combo.currentTextChanged.connect(self._value_changed)
 
         self._component_meta: dict[str, tuple[str, list[str]]] = {}
 
     def set_component_options(self, ordered_components: list[tuple[str, str, list[str]]]) -> None:
-        current_component = self.component()
-        current_value = self.value()
-        self._component_meta = {name: (kind, values) for name, kind, values in ordered_components}
-        self.component_combo.blockSignals(True)
-        self.component_combo.clear()
-        self.component_combo.addItem("")
-        for name, kind, _values in ordered_components:
-            label = name if kind != "ferrule" else f"{name} (ferrule)"
-            self.component_combo.addItem(label, userData=name)
-        self.component_combo.blockSignals(False)
-        self.set_component(current_component)
-        self.set_value(current_value)
-        self._component_changed()
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            current_component = self.component()
+            current_value = self.value()
+            self._component_meta = {name: (kind, values) for name, kind, values in ordered_components}
+            self.component_combo.blockSignals(True)
+            self.component_combo.clear()
+            self.component_combo.addItem("")
+            for name, kind, _values in ordered_components:
+                if kind == "ferrule":
+                    label = f"{name} (наконечник)"
+                elif kind == "arrow":
+                    label = f"{name} (стрелка)"
+                else:
+                    label = name
+                self.component_combo.addItem(label, userData=name)
+            self.component_combo.blockSignals(False)
+            self.set_component(current_component)
+            self.set_value(current_value)
+            self._component_changed()
+        finally:
+            self._suppress_content_changed = previous
 
     def component(self) -> str:
         data = self.component_combo.currentData()
@@ -72,12 +94,16 @@ class _RouteCell(QWidget):
         return self.value_combo.currentText().strip()
 
     def set_component(self, name: str) -> None:
-        idx = 0
+        idx = -1
         for i in range(self.component_combo.count()):
             if self.component_combo.itemData(i) == name:
                 idx = i
                 break
-        self.component_combo.setCurrentIndex(idx)
+        if idx >= 0:
+            self.component_combo.setCurrentIndex(idx)
+        else:
+            self.component_combo.setCurrentIndex(-1)
+            self.component_combo.setEditText(name)
         self._component_changed()
 
     def set_value(self, value: str) -> None:
@@ -91,73 +117,103 @@ class _RouteCell(QWidget):
             self.value_combo.setCurrentText(value)
 
     def set_part(self, part: _PartModel) -> None:
-        self.set_component(part.component)
-        self.set_value(part.value)
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            self.set_component(part.component)
+            self.set_value(part.value)
+        finally:
+            self._suppress_content_changed = previous
 
     def part(self) -> _PartModel:
         return _PartModel(component=self.component(), value=self.value())
 
     def _component_changed(self) -> None:
-        component_name = self.component()
-        current_value = self.value()
-        self.value_combo.blockSignals(True)
-        self.value_combo.clear()
-        self.value_combo.addItem("")
-        if component_name and component_name in self._component_meta:
-            _kind, values = self._component_meta[component_name]
-            for value in values:
-                self.value_combo.addItem(value)
-        self.value_combo.blockSignals(False)
-        self.set_value(current_value)
+        notify = not self._suppress_content_changed
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            component_name = self.component()
+            current_value = self.value()
+            self.value_combo.blockSignals(True)
+            self.value_combo.clear()
+            self.value_combo.addItem("")
+            hint = "Номер или метка контакта/жилы; s означает экран кабеля."
+            if component_name and component_name in self._component_meta:
+                kind, values = self._component_meta[component_name]
+                for value in values:
+                    self.value_combo.addItem(value)
+                if kind == "connector":
+                    hint = "Номер, обозначение или метка контакта разъёма."
+                elif kind == "cable":
+                    hint = "Номер или метка жилы; s означает экран кабеля."
+                else:
+                    hint = "Для наконечника или стрелки значение обычно не требуется."
+            self.value_combo.setToolTip(hint)
+            self.value_combo.blockSignals(False)
+            self.set_value(current_value)
+        finally:
+            self._suppress_content_changed = previous
+        if notify:
+            self.content_changed.emit()
+
+    def _value_changed(self) -> None:
+        if not self._suppress_content_changed:
+            self.content_changed.emit()
 
 
 class ConnectionsEditor(QWidget):
-    MAX_STEPS = 7
+    content_changed = Signal()
+
+    INITIAL_STEPS = 7
+    MAX_MANUAL_STEPS = 99
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._suppress_content_changed = False
         self.current_items: list[ConnectionRowModel] = []
         self.connectors: list[ConnectorModel] = []
         self.cables: list[CableModel] = []
         self.ferrules: list[FerruleModel] = []
         self.visible_steps = 5
 
-        self.table = QTableWidget(0, self.MAX_STEPS)
+        self.table = QTableWidget(0, self.INITIAL_STEPS)
         self.table.verticalHeader().setVisible(True)
 
         self.help_label = QLabel(
-            "Табличный редактор соединений. В каждой ячейке выбери компонент и индекс pin/wire. "
-            "Пустые хвостовые ячейки игнорируются; для shield используй значение 's'."
+            "Табличный редактор соединений. В каждой ячейке выберите компонент и номер контакта или жилы. "
+            "Список следующего шага автоматически чередует разъёмы с кабелями или стрелками. "
+            "Пустые конечные ячейки игнорируются; для экрана используйте значение 's'."
         )
         self.help_label.setWordWrap(True)
 
-        self.add_btn = QPushButton("Add Row")
-        self.duplicate_btn = QPushButton("Duplicate Selected")
-        self.remove_btn = QPushButton("Remove Selected")
-        self.compact_btn = QPushButton("Compact Row")
-        self.add_btn.clicked.connect(self.add_row)
-        self.duplicate_btn.clicked.connect(self.duplicate_selected)
-        self.remove_btn.clicked.connect(self.remove_selected)
-        self.compact_btn.clicked.connect(self.compact_selected)
+        controls = QToolBar("Действия со строками")
+        controls.setMovable(False)
+        self.add_btn = QAction("Добавить строку", controls)
+        self.duplicate_btn = QAction("Дублировать выбранное", controls)
+        self.remove_btn = QAction("Удалить выбранное", controls)
+        self.compact_btn = QAction("Убрать пропуски", controls)
+        self.add_btn.triggered.connect(self.add_row)
+        self.duplicate_btn.triggered.connect(self.duplicate_selected)
+        self.remove_btn.triggered.connect(self.remove_selected)
+        self.compact_btn.triggered.connect(self.compact_selected)
+        controls.addActions(
+            [self.add_btn, self.duplicate_btn, self.remove_btn, self.compact_btn]
+        )
 
         self.steps_spin = QSpinBox()
-        self.steps_spin.setRange(3, self.MAX_STEPS)
-        self.steps_spin.setSingleStep(2)
+        self.steps_spin.setRange(3, self.MAX_MANUAL_STEPS)
+        self.steps_spin.setSingleStep(1)
         self.steps_spin.setValue(self.visible_steps)
-        self.steps_spin.setPrefix("Visible steps: ")
+        self.steps_spin.setPrefix("Видимых шагов: ")
         self.steps_spin.valueChanged.connect(self._set_visible_steps)
 
-        controls = QHBoxLayout()
-        controls.addWidget(self.add_btn)
-        controls.addWidget(self.duplicate_btn)
-        controls.addWidget(self.remove_btn)
-        controls.addWidget(self.compact_btn)
-        controls.addStretch(1)
+        controls.addSeparator()
         controls.addWidget(self.steps_spin)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.help_label)
-        layout.addLayout(controls)
+        layout.addWidget(controls)
         layout.addWidget(self.table)
 
         self._rebuild_headers()
@@ -175,23 +231,33 @@ class ConnectionsEditor(QWidget):
         self._refresh_all_cell_options()
 
     def load_items(self, items: list[ConnectionRowModel]) -> None:
-        self.current_items = items
-        self.table.setRowCount(0)
-        for item in items:
-            self.add_row(item.route)
+        previous = self._suppress_content_changed
+        self._suppress_content_changed = True
+        try:
+            self.current_items = items
+            self.table.setRowCount(0)
+            for item in items:
+                self.add_row(item.route)
+        finally:
+            self._suppress_content_changed = previous
 
     def add_row(self, route: str = "") -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             cell = _RouteCell(self.table)
-            cell.set_component_options(self._component_options())
+            cell.set_component_options(self._component_options_for_position(row, col))
+            cell.content_changed.connect(
+                lambda current_cell=cell: self._cell_content_changed(current_cell)
+            )
             self.table.setCellWidget(row, col, cell)
         if route:
             self._apply_route_to_row(row, route)
         else:
             self._prefill_row(row)
+            self._refresh_row_options(row)
         self.table.setCurrentCell(row, 0)
+        self._emit_content_changed()
 
     def duplicate_selected(self) -> None:
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
@@ -206,6 +272,8 @@ class ConnectionsEditor(QWidget):
             rows = [self.table.currentRow()]
         for row in rows:
             self.table.removeRow(row)
+        if rows:
+            self._emit_content_changed()
 
     def compact_selected(self) -> None:
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
@@ -240,31 +308,106 @@ class ConnectionsEditor(QWidget):
             options.append((item.name, "cable", values))
         for item in self.ferrules:
             options.append((item.name, "ferrule", []))
+        for arrow in ("->", "-->", "<=>"):
+            options.append((arrow, "arrow", []))
         return options
 
+    def _component_options_for_position(
+        self, row: int, col: int
+    ) -> list[tuple[str, str, list[str]]]:
+        previous_kind: str | None = None
+        for previous_col in range(col - 1, -1, -1):
+            previous_cell = self.table.cellWidget(row, previous_col)
+            if not isinstance(previous_cell, _RouteCell):
+                continue
+            component = previous_cell.component()
+            if component:
+                previous_kind = self._component_kind(component)
+                break
+
+        options = self._component_options()
+        if previous_kind == "connector":
+            return [item for item in options if item[1] in {"cable", "arrow"}]
+        if previous_kind == "cable_or_arrow":
+            return [item for item in options if item[1] in {"connector", "ferrule"}]
+        return [item for item in options if item[1] != "arrow"]
+
+    def _component_kind(self, component: str) -> str | None:
+        if ProjectSerializer._is_arrow(component):
+            return "cable_or_arrow"
+        base_name = component.split(".", 1)[0]
+        if any(item.name == base_name for item in [*self.connectors, *self.ferrules]):
+            return "connector"
+        if any(item.name == base_name for item in self.cables):
+            return "cable_or_arrow"
+        if component.startswith("[") and component.endswith("]"):
+            parsed = ProjectSerializer._parse_connection_part(component)
+            if isinstance(parsed, list):
+                kinds = {
+                    kind
+                    for value in parsed
+                    if (kind := self._component_kind(str(value))) is not None
+                }
+                if len(kinds) == 1:
+                    return kinds.pop()
+        return None
+
     def _rebuild_headers(self) -> None:
-        self.table.setHorizontalHeaderLabels([f"Step {idx}" for idx in range(1, self.MAX_STEPS + 1)])
+        self.table.setHorizontalHeaderLabels([f"Шаг {idx}" for idx in range(1, self.table.columnCount() + 1)])
         self.table.horizontalHeader().setStretchLastSection(False)
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             self.table.setColumnWidth(col, 220)
 
     def _set_visible_steps(self, value: int) -> None:
-        if value % 2 == 0:
-            value += 1
-        self.visible_steps = max(3, min(self.MAX_STEPS, value))
+        self._ensure_step_count(value)
+        self.visible_steps = max(3, value)
         self.steps_spin.blockSignals(True)
         self.steps_spin.setValue(self.visible_steps)
         self.steps_spin.blockSignals(False)
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             self.table.setColumnHidden(col, col >= self.visible_steps)
 
-    def _refresh_all_cell_options(self) -> None:
-        options = self._component_options()
+    def _ensure_step_count(self, count: int) -> None:
+        count = max(3, count)
+        old_count = self.table.columnCount()
+        if count <= old_count:
+            return
+
+        self.table.setColumnCount(count)
+        self.steps_spin.setMaximum(max(self.steps_spin.maximum(), count))
         for row in range(self.table.rowCount()):
-            for col in range(self.MAX_STEPS):
-                cell = self.table.cellWidget(row, col)
-                if isinstance(cell, _RouteCell):
-                    cell.set_component_options(options)
+            for col in range(old_count, count):
+                cell = _RouteCell(self.table)
+                cell.set_component_options(self._component_options_for_position(row, col))
+                cell.content_changed.connect(
+                    lambda current_cell=cell: self._cell_content_changed(current_cell)
+                )
+                self.table.setCellWidget(row, col, cell)
+        self._rebuild_headers()
+
+    def _emit_content_changed(self) -> None:
+        if not self._suppress_content_changed:
+            self.content_changed.emit()
+
+    def _cell_content_changed(self, changed_cell: _RouteCell) -> None:
+        for row in range(self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                if self.table.cellWidget(row, col) is changed_cell:
+                    self._refresh_row_options(row, col + 1)
+                    self._emit_content_changed()
+                    return
+
+    def _refresh_all_cell_options(self) -> None:
+        for row in range(self.table.rowCount()):
+            self._refresh_row_options(row)
+
+    def _refresh_row_options(self, row: int, start_col: int = 0) -> None:
+        for col in range(start_col, self.table.columnCount()):
+            cell = self.table.cellWidget(row, col)
+            if isinstance(cell, _RouteCell):
+                cell.set_component_options(
+                    self._component_options_for_position(row, col)
+                )
 
     def _prefill_row(self, row: int) -> None:
         if not self.connectors or not self.cables:
@@ -283,28 +426,30 @@ class ConnectionsEditor(QWidget):
                 cell.set_part(part)
 
     def _apply_route_to_row(self, row: int, route: str) -> None:
-        for col in range(self.MAX_STEPS):
+        parts = ProjectSerializer._split_route(route)
+        self._ensure_step_count(len(parts))
+        for col in range(self.table.columnCount()):
             cell = self.table.cellWidget(row, col)
             if isinstance(cell, _RouteCell):
                 cell.set_part(_PartModel())
-        parts = [part.strip() for part in route.split("->") if part.strip()]
-        for col, part in enumerate(parts[: self.MAX_STEPS]):
+        for col, part in enumerate(parts):
             component = part
             value = ""
-            if ":" in part:
-                component, raw_value = part.split(":", 1)
-                parsed = ProjectSerializer._parse_value(raw_value.strip())
-                value = ProjectSerializer._format_connection_value(parsed)
+            parsed = ProjectSerializer._parse_connection_part(part)
+            if isinstance(parsed, dict) and parsed:
+                component, parsed_value = next(iter(parsed.items()))
+                value = ProjectSerializer._format_connection_value(parsed_value)
             cell = self.table.cellWidget(row, col)
             if isinstance(cell, _RouteCell):
-                cell.set_part(_PartModel(component.strip(), value))
-        needed = min(self.MAX_STEPS, max(3, len(parts) if len(parts) % 2 == 1 else len(parts) + 1))
+                cell.set_part(_PartModel(str(component).strip(), value))
+        self._refresh_row_options(row)
+        needed = max(3, len(parts))
         if needed > self.visible_steps:
             self._set_visible_steps(needed)
 
     def _route_from_row(self, row: int) -> str:
         parts: list[str] = []
-        for col in range(self.MAX_STEPS):
+        for col in range(self.table.columnCount()):
             cell = self.table.cellWidget(row, col)
             if not isinstance(cell, _RouteCell):
                 continue

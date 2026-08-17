@@ -1,0 +1,139 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Подготовка: Windows — Python-окружение",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File",
+                "${workspaceFolder}\\packaging\\windows\\prepare.ps1"
+            ],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Windows — portable ZIP",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File",
+                "${workspaceFolder}\\packaging\\windows\\build.ps1",
+                "-SkipInstaller"
+            ],
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": "Подготовка: Windows — Python-окружение",
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Windows — portable ZIP + Setup EXE",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File",
+                "${workspaceFolder}\\packaging\\windows\\build.ps1"
+            ],
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": "Подготовка: Windows — Python-окружение",
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Подготовка: Ubuntu — инструменты AppImage",
+            "type": "process",
+            "command": "bash",
+            "args": ["${workspaceFolder}/packaging/linux/prepare_appimage_tools.sh"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Ubuntu — portable tar.gz",
+            "type": "process",
+            "command": "bash",
+            "args": ["${workspaceFolder}/packaging/linux/build.sh", "portable"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "OVERWRITE": "1" }
+            },
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Ubuntu — AppDir",
+            "type": "process",
+            "command": "bash",
+            "args": ["${workspaceFolder}/packaging/linux/build.sh", "appdir"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "OVERWRITE": "1" }
+            },
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Ubuntu — AppImage + AppDir",
+            "type": "process",
+            "command": "bash",
+            "args": ["${workspaceFolder}/packaging/linux/build.sh", "appimage"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "OVERWRITE": "1",
+                    "APPIMAGE_EXTRACT_AND_RUN": "1",
+                    "APPIMAGETOOL": "${workspaceFolder}/build/linux/tools/appimagetool-1.9.1-x86_64.AppImage",
+                    "APPIMAGE_RUNTIME_FILE": "${workspaceFolder}/build/linux/tools/type2-runtime-75849dce7cc37e4319b633df1f116ca895c71a12-x86_64"
+                }
+            },
+            "dependsOn": "Подготовка: Ubuntu — инструменты AppImage",
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Ubuntu — DEB",
+            "type": "process",
+            "command": "bash",
+            "args": ["${workspaceFolder}/packaging/linux/build.sh", "deb"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "OVERWRITE": "1" }
+            },
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Сборка: Ubuntu — все форматы",
+            "type": "process",
+            "command": "bash",
+            "args": ["${workspaceFolder}/packaging/linux/build.sh", "all"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "OVERWRITE": "1",
+                    "APPIMAGE_EXTRACT_AND_RUN": "1",
+                    "APPIMAGETOOL": "${workspaceFolder}/build/linux/tools/appimagetool-1.9.1-x86_64.AppImage",
+                    "APPIMAGE_RUNTIME_FILE": "${workspaceFolder}/build/linux/tools/type2-runtime-75849dce7cc37e4319b633df1f116ca895c71a12-x86_64"
+                }
+            },
+            "dependsOn": "Подготовка: Ubuntu — инструменты AppImage",
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+        }
+    ]
+}

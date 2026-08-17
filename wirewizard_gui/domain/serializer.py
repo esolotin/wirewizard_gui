@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
+from html import escape, unescape
 from typing import Any
 import re
+from uuid import uuid4
 
 import yaml
 
 from wirewizard_gui.domain.models import (
+    AnnotationModel,
     CableModel,
     ConnectionRowModel,
     ConnectorModel,
@@ -16,12 +20,26 @@ from wirewizard_gui.domain.models import (
 
 
 class ProjectSerializer:
+    _ANNOTATION_PREFIX = "__WW_NOTE_"
+    _TOP_LEVEL_KEYS = {"metadata", "connectors", "cables", "connections"}
+    _METADATA_KEYS = {"title", "description"}
+    _CONNECTOR_KEYS = {
+        "type", "subtype", "style", "pincount", "pins", "pinlabels", "pinout",
+        "color", "notes", "pn", "manufacturer", "mpn", "supplier", "spn",
+        "ignore_in_bom",
+    }
+    _CABLE_KEYS = {
+        "type", "gauge", "length", "wirecount", "category", "color_code",
+        "colors", "wirelabels", "shield", "notes", "pn", "manufacturer", "mpn",
+        "supplier", "spn", "ignore_in_bom",
+    }
+
     @staticmethod
     def to_wireviz_dict(project: ProjectModel) -> dict:
-        data: dict[str, Any] = OrderedDict()
+        data: dict[str, Any] = OrderedDict(deepcopy(project.wireviz_extras))
 
-        if project.title or project.description:
-            metadata = OrderedDict()
+        if project.title or project.description or project.wireviz_metadata_extras:
+            metadata = OrderedDict(deepcopy(project.wireviz_metadata_extras))
             if project.title:
                 metadata["title"] = project.title
             if project.description:
@@ -29,8 +47,9 @@ class ProjectSerializer:
             data["metadata"] = metadata
 
         connectors = OrderedDict()
+        annotation_names: list[str] = []
         for item in project.connectors:
-            entry = OrderedDict()
+            entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
             if item.subtype:
                 entry["subtype"] = item.subtype
@@ -46,10 +65,11 @@ class ProjectSerializer:
                 entry["color"] = item.color
             if item.notes:
                 entry["notes"] = item.notes
+            ProjectSerializer._add_bom_fields(entry, item)
             connectors[item.name] = entry
 
         for item in project.ferrules:
-            entry = OrderedDict()
+            entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
             if item.subtype:
                 entry["subtype"] = item.subtype
@@ -58,14 +78,29 @@ class ProjectSerializer:
                 entry["color"] = item.color
             if item.notes:
                 entry["notes"] = item.notes
+            ProjectSerializer._add_bom_fields(entry, item)
             connectors[item.name] = entry
+
+        for item in project.annotations:
+            entry = OrderedDict()
+            entry["type"] = escape(item.title.strip() or "Примечание")
+            if item.text.strip():
+                entry["notes"] = escape(item.text.strip())
+            entry["style"] = "simple"
+            entry["show_name"] = False
+            entry["show_pincount"] = False
+            entry["ignore_in_bom"] = True
+            entry["bgcolor"] = "#fff8c5"
+            name = f"{ProjectSerializer._ANNOTATION_PREFIX}{item.id}"
+            connectors[name] = entry
+            annotation_names.append(name)
 
         if connectors:
             data["connectors"] = connectors
 
         cables = OrderedDict()
         for item in project.cables:
-            entry = OrderedDict()
+            entry = OrderedDict(deepcopy(item.wireviz_extras))
             entry["type"] = item.type
             entry["gauge"] = ProjectSerializer._serialize_gauge(item.gauge)
             entry["length"] = ProjectSerializer._serialize_length(item.length)
@@ -82,6 +117,7 @@ class ProjectSerializer:
                 entry["shield"] = True
             if item.notes:
                 entry["notes"] = item.notes
+            ProjectSerializer._add_bom_fields(entry, item)
             cables[item.name] = entry
 
         if cables:
@@ -101,6 +137,11 @@ class ProjectSerializer:
             if items:
                 connection_sets.append(items)
 
+        # A one-node connection set makes WireViz include the isolated note
+        # without reporting it as a forgotten component. Graphviz still lays
+        # it out as a separate box, so it cannot cover wires or components.
+        connection_sets.extend([[name] for name in annotation_names])
+
         if connection_sets:
             data["connections"] = connection_sets
 
@@ -115,34 +156,63 @@ class ProjectSerializer:
     def from_wireviz_yaml(text: str) -> ProjectModel:
         raw = yaml.safe_load(text) or {}
         if not isinstance(raw, dict):
-            raise ValueError("YAML root must be a mapping/object")
+            raise ValueError("Корневой элемент YAML должен быть объектом")
         return ProjectSerializer.from_wireviz_dict(raw)
 
     @staticmethod
     def from_wireviz_dict(data: dict[str, Any]) -> ProjectModel:
         metadata = data.get("metadata") or {}
-        title = metadata.get("title", "Imported harness") if isinstance(metadata, dict) else "Imported harness"
+        title = metadata.get("title", "Импортированный жгут") if isinstance(metadata, dict) else "Импортированный жгут"
         description = metadata.get("description", "") if isinstance(metadata, dict) else ""
 
-        project = ProjectModel(title=title, description=description)
+        project = ProjectModel(
+            title=title,
+            description=description,
+            wireviz_extras=ProjectSerializer._unknown_fields(
+                data, ProjectSerializer._TOP_LEVEL_KEYS
+            ),
+            wireviz_metadata_extras=(
+                ProjectSerializer._unknown_fields(
+                    metadata, ProjectSerializer._METADATA_KEYS
+                )
+                if isinstance(metadata, dict)
+                else {}
+            ),
+        )
 
         connectors_data = data.get("connectors") or {}
         if not isinstance(connectors_data, dict):
-            raise ValueError("'connectors' must be a mapping")
+            raise ValueError("Раздел 'connectors' должен быть объектом")
 
         for name, entry in connectors_data.items():
             entry = entry or {}
             if not isinstance(entry, dict):
                 entry = {"type": str(entry)}
             is_simple = entry.get("style") == "simple"
-            type_text = str(entry.get("type", "Generic connector"))
+            type_text = str(entry.get("type", "Универсальный разъём"))
             subtype = str(entry.get("subtype", "") or "")
             color = str(entry.get("color", "") or "")
             notes = str(entry.get("notes", "") or "")
             pins = ProjectSerializer._string_list(entry.get("pins"))
             pinlabels = ProjectSerializer._string_list(entry.get("pinlabels") or entry.get("pinout"))
 
-            if is_simple and (str(name).upper().startswith("F") or "ferrule" in type_text.lower()):
+            if is_simple and str(name).startswith(ProjectSerializer._ANNOTATION_PREFIX):
+                annotation_id = str(name)[len(ProjectSerializer._ANNOTATION_PREFIX):]
+                project.annotations.append(
+                    AnnotationModel(
+                        id=annotation_id or uuid4().hex,
+                        title=unescape(type_text) or "Примечание",
+                        text=unescape(notes),
+                    )
+                )
+                continue
+
+            ferrule_type = type_text.lower()
+            if is_simple and (
+                str(name).upper().startswith("F")
+                or "ferrule" in ferrule_type
+                or "наконечник" in ferrule_type
+            ):
                 project.ferrules.append(
                     FerruleModel(
                         name=str(name),
@@ -150,6 +220,10 @@ class ProjectSerializer:
                         subtype=subtype or "0.5 mm²",
                         color=color,
                         notes=notes,
+                        wireviz_extras=ProjectSerializer._unknown_fields(
+                            entry, ProjectSerializer._CONNECTOR_KEYS
+                        ),
+                        **ProjectSerializer._read_bom_fields(entry),
                     )
                 )
             else:
@@ -165,12 +239,16 @@ class ProjectSerializer:
                         notes=notes,
                         color=color,
                         simple=is_simple,
+                        wireviz_extras=ProjectSerializer._unknown_fields(
+                            entry, ProjectSerializer._CONNECTOR_KEYS
+                        ),
+                        **ProjectSerializer._read_bom_fields(entry),
                     )
                 )
 
         cables_data = data.get("cables") or {}
         if not isinstance(cables_data, dict):
-            raise ValueError("'cables' must be a mapping")
+            raise ValueError("Раздел 'cables' должен быть объектом")
 
         for name, entry in cables_data.items():
             entry = entry or {}
@@ -182,7 +260,7 @@ class ProjectSerializer:
             project.cables.append(
                 CableModel(
                     name=str(name),
-                    type=str(entry.get("type", "Generic cable")),
+                    type=str(entry.get("type", "Универсальный кабель")),
                     gauge=str(entry.get("gauge", "0.25 mm2")),
                     length=str(entry.get("length", "1 m")),
                     wirecount=wirecount,
@@ -192,14 +270,24 @@ class ProjectSerializer:
                     shield=bool(entry.get("shield", False)),
                     bundle=str(entry.get("category", "")).lower() == "bundle",
                     notes=str(entry.get("notes", "") or ""),
+                    wireviz_extras=ProjectSerializer._unknown_fields(
+                        entry, ProjectSerializer._CABLE_KEYS
+                    ),
+                    **ProjectSerializer._read_bom_fields(entry),
                 )
             )
 
         connections_data = data.get("connections") or []
         if not isinstance(connections_data, list):
-            raise ValueError("'connections' must be a list")
+            raise ValueError("Раздел 'connections' должен быть списком")
         for row in connections_data:
             if not isinstance(row, list):
+                continue
+            if (
+                len(row) == 1
+                and isinstance(row[0], str)
+                and row[0].startswith(ProjectSerializer._ANNOTATION_PREFIX)
+            ):
                 continue
             route_parts = [ProjectSerializer._format_connection_part(part) for part in row]
             route = " -> ".join(part for part in route_parts if part)
@@ -207,6 +295,32 @@ class ProjectSerializer:
                 project.connections.append(ConnectionRowModel(route=route))
 
         return project
+
+    @staticmethod
+    def _unknown_fields(
+        data: dict[str, Any], known_keys: set[str]
+    ) -> dict[str, Any]:
+        return {
+            key: deepcopy(value)
+            for key, value in data.items()
+            if key not in known_keys
+        }
+
+    @staticmethod
+    def _add_bom_fields(entry: dict[str, Any], item: object) -> None:
+        for field_name in ("pn", "manufacturer", "mpn", "supplier", "spn"):
+            value = str(getattr(item, field_name, "") or "").strip()
+            if value:
+                entry[field_name] = value
+        if getattr(item, "ignore_in_bom", False):
+            entry["ignore_in_bom"] = True
+
+    @staticmethod
+    def _read_bom_fields(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            field_name: str(entry.get(field_name, "") or "")
+            for field_name in ("pn", "manufacturer", "mpn", "supplier", "spn")
+        } | {"ignore_in_bom": bool(entry.get("ignore_in_bom", False))}
 
     @staticmethod
     def _format_connection_part(part: Any) -> str:
@@ -335,26 +449,50 @@ class ProjectSerializer:
         return items
 
     @staticmethod
+    def _is_arrow(value: str) -> bool:
+        return bool(re.fullmatch(r"<?(?:-+|=+)>?", str(value).strip()))
+
+    @staticmethod
     def _split_route(route: str) -> list[str]:
         parts: list[str] = []
         current: list[str] = []
         depth = 0
         idx = 0
+        arrow_with_separators = re.compile(
+            r"->\s*(<?(?:-+|=+)>?)\s*->"
+        )
+
         while idx < len(route):
             ch = route[idx]
             if ch == "[":
                 depth += 1
             elif ch == "]" and depth > 0:
                 depth -= 1
-            if depth == 0 and route[idx:idx + 2] == "->":
-                token = "".join(current).strip()
-                if token:
-                    parts.append(token)
-                current = []
-                idx += 2
-                continue
+
+            if depth == 0:
+                arrow_match = arrow_with_separators.match(route, idx)
+                if arrow_match is not None:
+                    token = "".join(current).strip()
+                    if token:
+                        parts.append(token)
+                    parts.append(arrow_match.group(1))
+                    current = []
+                    idx = arrow_match.end()
+                    continue
+
+                is_separator = route.startswith("->", idx)
+                belongs_to_longer_arrow = idx > 0 and route[idx - 1] in "-<"
+                if is_separator and not belongs_to_longer_arrow:
+                    token = "".join(current).strip()
+                    if token:
+                        parts.append(token)
+                    current = []
+                    idx += 2
+                    continue
+
             current.append(ch)
             idx += 1
+
         token = "".join(current).strip()
         if token:
             parts.append(token)

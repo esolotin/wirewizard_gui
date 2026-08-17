@@ -1,0 +1,12 @@
+Package: wirewizard-gui
+Version: @VERSION@
+Section: graphics
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: WireWizardGUI contributors <esolotin@users.noreply.github.com>
+Depends: graphviz, libc6, libgcc-s1, libstdc++6, libgl1, libegl1, libfontconfig1, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-shape0, libxcb-util1, libxcb-xinerama0, libxcb-xkb1
+Homepage: https://github.com/esolotin/wirewizard_gui
+Description: Desktop editor for WireViz wiring projects
+ WireWizardGUI provides a graphical editor, YAML preview and rendered wiring
+ diagram preview for WireViz projects.

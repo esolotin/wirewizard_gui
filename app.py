@@ -1,17 +1,6 @@
-from __future__ import annotations
+"""Compatibility launcher; the canonical application lives in the package."""
 
-import sys
-from PySide6.QtWidgets import QApplication
-
-from wirewizard_gui.ui.main_window import MainWindow
-
-
-def main() -> int:
-    app = QApplication(sys.argv)
-    app.setApplicationName("WireWizardGUI")
-    window = MainWindow()
-    window.show()
-    return app.exec()
+from wirewizard_gui.app import main
 
 
 if __name__ == "__main__":

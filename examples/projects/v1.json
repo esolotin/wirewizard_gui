@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "title": "Пример проекта формата v1",
+  "description": "Текущий формат JSON-проекта WireWizardGUI.",
+  "connectors": [
+    {
+      "name": "X1",
+      "pincount": 2
+    },
+    {
+      "name": "X2",
+      "pincount": 2
+    }
+  ],
+  "cables": [
+    {
+      "name": "W1",
+      "wirecount": 2
+    }
+  ],
+  "ferrules": [],
+  "connections": [
+    {
+      "route": "X1:[1, 2] -> W1:[1, 2] -> X2:[1, 2]"
+    },
+    {
+      "route": "X1:1 -> --> -> X2:1"
+    }
+  ]
+}
