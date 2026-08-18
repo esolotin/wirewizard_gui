@@ -161,7 +161,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\prep
 sudo apt update
 sudo apt install --yes --no-install-recommends \
   bash binutils ca-certificates curl desktop-file-utils dpkg-dev file git \
-  graphviz gzip python3 python3-venv tar xz-utils \
+  graphviz gzip libdbus-1-3 libpython3-dev python3 python3-venv tar xz-utils \
   libegl1 libfontconfig1 libgl1 libglib2.0-0 libx11-6 libx11-xcb1 \
   libxkbcommon0 libxkbcommon-x11-0 libxcb1 libxcb-cursor0 libxcb-icccm4 \
   libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 \

@@ -40,7 +40,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $oldPath = $env:PATH
 try {
-    if (-not $SkipInstaller -and $null -eq (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue)) {
+    if (-not $SkipInstaller) {
         $programFilesRoots = @(
             [Environment]::GetEnvironmentVariable("ProgramFiles(x86)"),
             [Environment]::GetEnvironmentVariable("ProgramFiles")
@@ -60,6 +60,12 @@ try {
                 break
             }
         }
+        if ($null -eq $compiler) {
+            $compilerCommand = Get-Command "ISCC.exe" -CommandType Application -ErrorAction SilentlyContinue
+            if ($null -ne $compilerCommand) {
+                $compiler = $compilerCommand.Path
+            }
+        }
 
         if ($null -eq $compiler) {
             throw "WireWizardGUI build: Inno Setup 7 or 6.3+ was not found. Install it, add ISCC.exe to PATH, or use -SkipInstaller."
@@ -67,19 +73,7 @@ try {
 
         $compilerDirectory = Split-Path -Parent $compiler
         $env:PATH = $compilerDirectory + [IO.Path]::PathSeparator + $env:PATH
-    }
-
-    if (-not $SkipInstaller) {
-        $resolvedCompiler = (Get-Command "ISCC.exe" -ErrorAction Stop).Source
-        $productVersion = (Get-Item -LiteralPath $resolvedCompiler).VersionInfo.ProductVersion
-        $versionMatch = [regex]::Match([string]$productVersion, '\d+\.\d+(?:\.\d+)?')
-        if (-not $versionMatch.Success) {
-            throw "WireWizardGUI build: could not determine the Inno Setup version for '$resolvedCompiler'. Inno Setup 6.3+ is required."
-        }
-        $innoVersion = [Version]$versionMatch.Value
-        if ($innoVersion -lt [Version]"6.3") {
-            throw "WireWizardGUI build: Inno Setup $innoVersion is too old; version 6.3 or newer is required."
-        }
+        Write-Host "Using Inno Setup compiler from '$compiler'."
     }
 
     $implementationParameters = @{
